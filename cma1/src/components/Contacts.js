@@ -59,9 +59,15 @@ export default function Contacts({ contacts, currentUser, changeChat }) {
             to: contact._id, // Contact's unique ID
           });
           const messages = response.data; // Assuming the API returns an array of messages
-          const latestMessage = messages[messages.length - 1]; // Get the latest message
-         latestMessage.timestamp=formatTimestamp(latestMessage.timestamp);
-          return { contactId: contact._id, message: latestMessage };
+          if (messages && messages.length > 0) {
+            const latestMessage = messages[messages.length - 1]; // Get the latest message
+            const formattedMessage = {
+              ...latestMessage,
+              timestamp: latestMessage.timestamp ? formatTimestamp(latestMessage.timestamp) : "",
+            };
+            return { contactId: contact._id, message: formattedMessage };
+          }
+          return { contactId: contact._id, message: null };
         } catch (error) {
           console.error('Error fetching messages:', error);
           return { contactId: contact._id, message: null };
@@ -80,7 +86,7 @@ export default function Contacts({ contacts, currentUser, changeChat }) {
     fetchMessages();
   }, [contacts, currentUser]);
 
- 
+
 
   useEffect(() => {
     if (currentUser) {
@@ -120,17 +126,17 @@ export default function Contacts({ contacts, currentUser, changeChat }) {
                 </div>
                 <div>
                   <div className='username'>
-                  <p>{contact.username}</p>
-                  <span className='timestamp'>
-              {latestMessages[contact._id]?.timestamp}
-            </span>
-            </div>
-                <span  className='time-status'>{latestMessages[contact._id]?.message }</span>
-           </div>
-                
-                
-             </div>
-             
+                    <p>{contact.username}</p>
+                    <span className='timestamp'>
+                      {latestMessages[contact._id]?.timestamp}
+                    </span>
+                  </div>
+                  <span className='time-status'>{latestMessages[contact._id]?.message}</span>
+                </div>
+
+
+              </div>
+
             ))}
         </div>
       </div>
