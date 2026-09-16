@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import Profile from './Profile';
 import Search from './Search';
-import axios from 'axios';
-import { getAllMessagesRoute } from '../utils/APIRoutes';
+
 export default function Contacts({ contacts, currentUser, changeChat, unreadMessages }) {
   const [currentUserName, setCurrentUserName] = useState(undefined);
   const [currentUserImage, setCurrentUserImage] = useState(undefined);
@@ -34,8 +33,6 @@ export default function Contacts({ contacts, currentUser, changeChat, unreadMess
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
-        // hour: '2-digit',
-        // minute: '2-digit',
       });
     } else {
       // Older than two weeks: Show full date and time
@@ -43,48 +40,26 @@ export default function Contacts({ contacts, currentUser, changeChat, unreadMess
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
-        // hour: '2-digit',
-        // minute: '2-digit',
       });
     }
   };
 
   useEffect(() => {
-    // Fetch messages for each contact
-    const fetchMessages = async () => {
-      const messagesPromises = contacts.map(async (contact) => {
-        try {
-          const response = await axios.post(getAllMessagesRoute, {
-            from: currentUser._id, // Assuming you have a unique user ID
-            to: contact._id, // Contact's unique ID
-          });
-          const messages = response.data; // Assuming the API returns an array of messages
-          if (messages && messages.length > 0) {
-            const latestMessage = messages[messages.length - 1]; // Get the latest message
-            const formattedMessage = {
-              ...latestMessage,
-              timestamp: latestMessage.timestamp ? formatTimestamp(latestMessage.timestamp) : "",
-            };
-            return { contactId: contact._id, message: formattedMessage };
-          }
-          return { contactId: contact._id, message: null };
-        } catch (error) {
-          console.error('Error fetching messages:', error);
-          return { contactId: contact._id, message: null };
+    if (contacts && contacts.length > 0) {
+      const latestMessagesMap = {};
+      contacts.forEach((contact) => {
+        if (contact.latestMessage && contact.latestMessage.message) {
+          latestMessagesMap[contact._id] = {
+            ...contact.latestMessage,
+            timestamp: contact.latestMessage.timestamp ? formatTimestamp(contact.latestMessage.timestamp) : "",
+          };
+        } else {
+          latestMessagesMap[contact._id] = null;
         }
       });
-
-      const latestMessagesMap = {};
-      const latestMessagesArray = await Promise.all(messagesPromises);
-      latestMessagesArray.forEach((item) => {
-        latestMessagesMap[item.contactId] = item.message;
-      });
-
       setLatestMessages(latestMessagesMap);
-    };
-
-    fetchMessages();
-  }, [contacts, currentUser]);
+    }
+  }, [contacts]);
 
 
 
@@ -127,7 +102,7 @@ export default function Contacts({ contacts, currentUser, changeChat, unreadMess
                 <div>
                   <div className='username'>
                     <p>{contact.username}</p>
-                    {unreadMessages?.[contact._id] > 0 && (
+                    {((contact.unreadCount || 0) + (unreadMessages?.[contact._id] || 0)) > 0 && (
                       <span
                         className='unread-badge'
                         style={{
@@ -140,7 +115,7 @@ export default function Contacts({ contacts, currentUser, changeChat, unreadMess
                           marginLeft: '6px',
                         }}
                       >
-                        {unreadMessages[contact._id]}
+                        {(contact.unreadCount || 0) + (unreadMessages?.[contact._id] || 0)}
                       </span>
                     )}
                     <span className='timestamp'>

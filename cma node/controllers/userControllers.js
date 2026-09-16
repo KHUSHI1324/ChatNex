@@ -1,5 +1,6 @@
-const User=require("../models/userModels");
-const bcrypt=require('bcrypt');
+const User = require("../models/userModels");
+const mongoose = require("mongoose");
+const bcrypt = require('bcrypt');
 
 module.exports.register=async(req,res,next)=>{
 
@@ -57,7 +58,7 @@ return res.json({isSet: userData.isAvtarImageSet,
 }
 };
 
- module.exports.getAllUsers=async(req,res,next)=>{
+module.exports.getAllUsers=async(req,res,next)=>{
     try {
         const users=await User.find({_id:{$ne:req.params.id}}).select([
             "email",
@@ -69,4 +70,104 @@ return res.json({isSet: userData.isAvtarImageSet,
     } catch (ex) {
         next(ex);
     }
- };
+};
+
+module.exports.getContactsWithLastMessage = async (req, res, next) => {
+    try {
+        const currentUserId = new mongoose.Types.ObjectId(req.params.id);
+        const currentUserIdStr = req.params.id.toString();
+
+        const contacts = await User.aggregate([
+            {
+                $match: {
+                    _id: { $ne: currentUserId }
+                }
+            },
+            {
+                $lookup: {
+                    from: "messages",
+                    let: { contactIdStr: { $toString: "$_id" } },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: {
+                                    $and: [
+                                        { $in: [currentUserIdStr, "$users"] },
+                                        { $in: ["$$contactIdStr", "$users"] }
+                                    ]
+                                }
+                            }
+                        },
+                        { $sort: { createdAt: -1 } },
+                        { $limit: 1 },
+                        {
+                            $project: {
+                                _id: 1,
+                                message: "$message.text",
+                                sender: 1,
+                                createdAt: 1
+                            }
+                        }
+                    ],
+                    as: "lastMessageData"
+                }
+            },
+            {
+                $lookup: {
+                    from: "messages",
+                    let: { contactIdStr: { $toString: "$_id" }, contactObjId: "$_id" },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: {
+                                    $and: [
+                                        { $in: [currentUserIdStr, "$users"] },
+                                        { $in: ["$$contactIdStr", "$users"] },
+                                        { $eq: ["$sender", "$$contactObjId"] },
+                                        { $eq: ["$read", false] }
+                                    ]
+                                }
+                            }
+                        },
+                        { $count: "count" }
+                    ],
+                    as: "unreadData"
+                }
+            },
+            {
+                $addFields: {
+                    lastMessageObj: { $arrayElemAt: ["$lastMessageData", 0] },
+                    unreadCountVal: { $ifNull: [{ $arrayElemAt: ["$unreadData.count", 0] }, 0] }
+                }
+            },
+            {
+                $project: {
+                    _id: 1,
+                    username: 1,
+                    email: 1,
+                    avtarImage: 1,
+                    isAvtarImageSet: 1,
+                    latestMessage: {
+                        message: "$lastMessageObj.message",
+                        timestamp: "$lastMessageObj.createdAt",
+                        sender: "$lastMessageObj.sender"
+                    },
+                    lastMessageTimestamp: {
+                        $ifNull: ["$lastMessageObj.createdAt", new Date(0)]
+                    },
+                    unreadCount: "$unreadCountVal"
+                }
+            },
+            {
+                $sort: {
+                    lastMessageTimestamp: -1,
+                    username: 1
+                }
+            }
+        ]);
+
+        return res.json(contacts);
+    } catch (ex) {
+        next(ex);
+    }
+};

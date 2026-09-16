@@ -5,12 +5,12 @@ import axios from 'axios';
 import styled from 'styled-components';
 import Contacts from '../components/Contacts';
 import ChatContainer from '../components/ChatContainer';
-import { allUsersRoute, host } from '../utils/APIRoutes';
+import { contactsWithLastMessageRoute, markReadRoute, host } from '../utils/APIRoutes';
 import Welcome from '../components/Welcome';
 import Chats from '../components/Chats';
 import Call from '../components/Call';
 import { io } from 'socket.io-client';
-import  Profile from '../components/Profile'; 
+import Profile from '../components/Profile'; 
 import logo from '../images/wa.png';
 import FitbitIcon from '@mui/icons-material/Fitbit';
 function ChatPage() {
@@ -66,6 +66,10 @@ function ChatPage() {
             message: msgText,
             timestamp,
           });
+          // Mark immediately as read in DB if currently viewing this chat
+          if (currentUser && senderId) {
+            axios.put(markReadRoute, { from: senderId, to: currentUser._id }).catch(console.error);
+          }
         } else {
           // Message is from another contact or Welcome screen is open
           if (senderId) {
@@ -87,7 +91,7 @@ function ChatPage() {
     async function fetchData() {
       if (currentUser) {
         if (currentUser.isAvtarImageSet) {
-          const data = await axios.get(`${allUsersRoute}/${currentUser._id}`);
+          const data = await axios.get(`${contactsWithLastMessageRoute}/${currentUser._id}`);
           setContacts(data.data);
         } else {
           navigate('/avtar');
@@ -97,14 +101,32 @@ function ChatPage() {
     fetchData();
   }, [currentUser]);
 
-  const handleChatChange = (chat) => {
+  const handleChatChange = async (chat) => {
     setCurrentChat(chat);
-    if (chat) {
+    if (chat && currentUser) {
+      // Clear live unread state
       setUnreadMessages((prev) => {
         const updated = { ...prev };
         delete updated[chat._id];
         return updated;
       });
+
+      // Clear DB-loaded unread count in contacts state
+      setContacts((prevContacts) =>
+        prevContacts.map((c) =>
+          c._id === chat._id ? { ...c, unreadCount: 0 } : c
+        )
+      );
+
+      // Persist read status in database
+      try {
+        await axios.put(markReadRoute, {
+          from: chat._id,
+          to: currentUser._id,
+        });
+      } catch (err) {
+        console.error("Error marking messages as read:", err);
+      }
     }
   };
 

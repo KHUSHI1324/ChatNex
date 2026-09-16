@@ -2,7 +2,7 @@
 const express = require("express");
 const router = express.Router();
 const multer = require('multer'); 
-const { addMessage, getAllMessage,uploadMedia } = require("../controllers/messagesController");
+const { addMessage, getAllMessage, uploadMedia, markAsRead } = require("../controllers/messagesController");
 
 // image storage path
 const imgconfig= multer.diskStorage({
@@ -34,4 +34,6 @@ router.post('/upload', upload.single('photo'), uploadMedia);
 
 router.post("/addmsg", addMessage);
 router.post("/getmsg", getAllMessage);
+router.put("/mark-read", markAsRead);
+router.post("/mark-read", markAsRead);
 module.exports = router;
