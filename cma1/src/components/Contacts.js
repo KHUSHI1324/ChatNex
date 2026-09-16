@@ -4,7 +4,7 @@ import Profile from './Profile';
 import Search from './Search';
 import axios from 'axios';
 import { getAllMessagesRoute } from '../utils/APIRoutes';
-export default function Contacts({ contacts, currentUser, changeChat }) {
+export default function Contacts({ contacts, currentUser, changeChat, unreadMessages }) {
   const [currentUserName, setCurrentUserName] = useState(undefined);
   const [currentUserImage, setCurrentUserImage] = useState(undefined);
   const [currentSelected, setCurrentSelected] = useState(undefined);
@@ -127,6 +127,22 @@ export default function Contacts({ contacts, currentUser, changeChat }) {
                 <div>
                   <div className='username'>
                     <p>{contact.username}</p>
+                    {unreadMessages?.[contact._id] > 0 && (
+                      <span
+                        className='unread-badge'
+                        style={{
+                          backgroundColor: '#25d366',
+                          color: '#fff',
+                          borderRadius: '12px',
+                          padding: '1px 7px',
+                          fontSize: '11px',
+                          fontWeight: 'bold',
+                          marginLeft: '6px',
+                        }}
+                      >
+                        {unreadMessages[contact._id]}
+                      </span>
+                    )}
                     <span className='timestamp'>
                       {latestMessages[contact._id]?.timestamp}
                     </span>

@@ -1,21 +1,19 @@
 // ChatContainer.js
 import React, { useEffect, useState, useRef } from "react";
 import axios from "axios";
-import io from "socket.io-client";
 import ChatInput from "./ChatInput";
 import CallIcon from '@mui/icons-material/Call';
 import VideoCallIcon from '@mui/icons-material/VideoCall';
 import FindInPageIcon from '@mui/icons-material/FindInPage';
-import { sendMessageRoute, getAllMessagesRoute, host } from "../utils/APIRoutes";
+import { sendMessageRoute, getAllMessagesRoute } from "../utils/APIRoutes";
 import { v4 as uuidv4 } from "uuid";
-export default function ChatContainer({ currentChat, currentUser }) {
+
+export default function ChatContainer({ currentChat, currentUser, socket, arrivalMessage }) {
   const [messages, setMessages] = useState([]);
-  const [arrivalMessage, setArrivalMessage] = useState(null);
   const [onlineUsers, setOnlineUsers] = useState(new Map()); // New state for online/offline status
   const [hoveredMessageIndex, setHoveredMessageIndex] = useState(null);
   const [showSearchInputBar, setShowSearchInputBar] = useState(false); // State to track search input bar visibility
   const [option, setOption] = useState();
-  const socketRef = useRef();
   const scrollRef = useRef();
   const [searchTerm, setSearchTerm] = useState(""); // State to track the search term
 
@@ -24,22 +22,17 @@ export default function ChatContainer({ currentChat, currentUser }) {
   }, [messages]);
 
   useEffect(() => {
-    const socket = io(host);
-    socketRef.current = socket;
+    if (socket?.current) {
+      const handleUserStatus = (userId, status) => {
+        setOnlineUsers((prev) => new Map(prev.set(userId, status)));
+      };
+      socket.current.on("user-status", handleUserStatus);
 
-    socket.on("connect", () => {
-      socket.emit("add-user", currentUser._id);
-    });
-
-    // Update online status based on socket events
-    socket.on("user-status", (userId, status) => {
-      setOnlineUsers(new Map(onlineUsers.set(userId, status)));
-    });
-
-    return () => {
-      socket.disconnect();
-    };
-  }, [currentUser]);
+      return () => {
+        socket.current.off("user-status", handleUserStatus);
+      };
+    }
+  }, [socket]);
 
   useEffect(() => {
     async function fetchData() {
@@ -63,28 +56,22 @@ export default function ChatContainer({ currentChat, currentUser }) {
       to: currentChat._id,
       message: msg,
     });
-    socketRef.current.emit("send-msg", {
-      from: currentUser._id,
-      to: currentChat._id,
-      message: msg,
-    });
+    if (socket?.current) {
+      socket.current.emit("send-msg", {
+        from: currentUser._id,
+        to: currentChat._id,
+        message: msg,
+      });
+    }
     const timestamp = new Date().toISOString(); // Update timestamp to current time
     const newMessage = { fromSelf: true, message: msg, timestamp };
-    setMessages([...messages, newMessage]);
+    setMessages((prev) => [...prev, newMessage]);
   };
 
   useEffect(() => {
-    if (socketRef.current) {
-      socketRef.current.on("msg-recieve", (msg) => {
-        const timestamp = new Date().toISOString(); // Update timestamp to current time
-        const newMessage = { fromSelf: false, message: msg, timestamp };
-        setArrivalMessage(newMessage);
-      });
+    if (arrivalMessage) {
+      setMessages((prev) => [...prev, arrivalMessage]);
     }
-  }, []);
-
-  useEffect(() => {
-    arrivalMessage && setMessages((prev) => [...prev, arrivalMessage]);
   }, [arrivalMessage]);
 
   const getDay = (timestamp) => {

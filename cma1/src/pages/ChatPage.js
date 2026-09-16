@@ -19,7 +19,14 @@ function ChatPage() {
   const [contacts, setContacts] = useState([]);
   const [currentUser, setCurrentUser] = useState(undefined);
   const [currentChat, setCurrentChat] = useState(undefined);
+  const [arrivalMessage, setArrivalMessage] = useState(null);
+  const [unreadMessages, setUnreadMessages] = useState({});
   const [isLoaded, setIsLoaded] = useState(false);
+
+  const currentChatRef = useRef(currentChat);
+  useEffect(() => {
+    currentChatRef.current = currentChat;
+  }, [currentChat]);
 
   useEffect(() => {
     async function fetchData() {
@@ -36,7 +43,43 @@ function ChatPage() {
   useEffect(() => {
     if (currentUser) {
       socket.current = io(host);
-      socket.current.emit('add-user', currentUser._id);
+
+      socket.current.on("connect", () => {
+        console.log(`[FRONTEND] Socket connected (${socket.current.id}). Emitting add-user for:`, currentUser._id);
+        socket.current.emit('add-user', currentUser._id);
+      });
+
+      if (socket.current.connected) {
+        socket.current.emit('add-user', currentUser._id);
+      }
+
+      socket.current.on("msg-recieve", (data) => {
+        console.log("[FRONTEND] msg-recieve event received at ChatPage:", data);
+        const senderId = typeof data === "object" ? data.from : null;
+        const msgText = typeof data === "object" ? (data.message || data.msg) : data;
+        const timestamp = new Date().toISOString();
+
+        // Check if message is from the active open chat
+        if (currentChatRef.current && senderId === currentChatRef.current._id) {
+          setArrivalMessage({
+            fromSelf: false,
+            message: msgText,
+            timestamp,
+          });
+        } else {
+          // Message is from another contact or Welcome screen is open
+          if (senderId) {
+            setUnreadMessages((prev) => ({
+              ...prev,
+              [senderId]: (prev[senderId] || 0) + 1,
+            }));
+          }
+        }
+      });
+
+      return () => {
+        socket.current.disconnect();
+      };
     }
   }, [currentUser]);
 
@@ -56,6 +99,13 @@ function ChatPage() {
 
   const handleChatChange = (chat) => {
     setCurrentChat(chat);
+    if (chat) {
+      setUnreadMessages((prev) => {
+        const updated = { ...prev };
+        delete updated[chat._id];
+        return updated;
+      });
+    }
   };
 
   return (
@@ -69,11 +119,11 @@ function ChatPage() {
            <Call contacts={contacts}/>  
          <Profile/>
           <div className='full'>
-            <Contacts  contacts={contacts} currentUser={currentUser} changeChat={handleChatChange} />
+            <Contacts contacts={contacts} currentUser={currentUser} changeChat={handleChatChange} unreadMessages={unreadMessages} />
             {isLoaded && currentChat === undefined ? (
               <Welcome currentUser={currentUser} />
             ) : (
-              <ChatContainer currentChat={currentChat} currentUser={currentUser} socket={socket} />
+              <ChatContainer currentChat={currentChat} currentUser={currentUser} socket={socket} arrivalMessage={arrivalMessage} />
             )}
           </div>
         </div>

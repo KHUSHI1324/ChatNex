@@ -53,23 +53,44 @@ const io = socket(server, {
 });
 
 io.on("connection", (socket) => {
+  console.log(`[SOCKET CONNECTED] Socket ID: ${socket.id}`);
+
   socket.on("add-user", (userId) => {
+    console.log(`[ADD-USER EVENT] Received userId: "${userId}" from socket: ${socket.id}`);
     onlineUsers.set(userId, socket.id);
+    console.log(`[ONLINE USERS MAP] Current connected users:`, Array.from(onlineUsers.entries()));
     // Notify all clients about the updated online status
     socket.emit("user-status", true);
 
     // Notify other clients about the updated online status of this user
     socket.broadcast.emit("user-status", userId, true);
+  });
 
+  socket.on("send-msg", (data) => {
+    console.log(`[SEND-MSG EVENT] Received data:`, data);
+    const sendUserSocket = onlineUsers.get(data.to);
+    console.log(`[SEND-MSG LOOKUP] Receiver userId: "${data.to}", Target socket.id: ${sendUserSocket}`);
+    if (sendUserSocket) {
+      const payload = {
+        from: data.from,
+        to: data.to,
+        message: data.message || data.msg,
+      };
+      console.log(`[EMITTING MSG-RECIEVE] Emitting to socket ${sendUserSocket} with payload:`, payload);
+      socket.to(sendUserSocket).emit("msg-recieve", payload);
+    } else {
+      console.log(`[SEND-MSG WARNING] Receiver "${data.to}" is NOT in onlineUsers map! (Offline or add-user not called)`);
+    }
   });
 
   socket.on("disconnect", () => {
+    console.log(`[SOCKET DISCONNECTED] Socket ID: ${socket.id}`);
     for (const [userId, socketId] of onlineUsers.entries()) {
       if (socketId === socket.id) {
         onlineUsers.delete(userId);
+        console.log(`[USER REMOVED] User "${userId}" removed. Remaining online:`, Array.from(onlineUsers.entries()));
         // Notify all clients about the updated online status
         socket.broadcast.emit("user-status", userId, false);
-
       }
     }
   });
