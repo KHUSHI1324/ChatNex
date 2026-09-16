@@ -5,11 +5,8 @@ import io from "socket.io-client";
 import ChatInput from "./ChatInput";
 import CallIcon from '@mui/icons-material/Call';
 import VideoCallIcon from '@mui/icons-material/VideoCall';
-import vc from "../images/vcc.png";
-import search from "../images/search.png";
-import watsapp_dark from '../images/Add.png';
 import FindInPageIcon from '@mui/icons-material/FindInPage';
-import { sendMessageRoute, getAllMessagesRoute } from "../utils/APIRoutes";
+import { sendMessageRoute, getAllMessagesRoute, host } from "../utils/APIRoutes";
 import { v4 as uuidv4 } from "uuid";
 export default function ChatContainer({ currentChat, currentUser }) {
   const [messages, setMessages] = useState([]);
@@ -17,17 +14,17 @@ export default function ChatContainer({ currentChat, currentUser }) {
   const [onlineUsers, setOnlineUsers] = useState(new Map()); // New state for online/offline status
   const [hoveredMessageIndex, setHoveredMessageIndex] = useState(null);
   const [showSearchInputBar, setShowSearchInputBar] = useState(false); // State to track search input bar visibility
- const [option,setOption] = useState();
+  const [option, setOption] = useState();
   const socketRef = useRef();
   const scrollRef = useRef();
   const [searchTerm, setSearchTerm] = useState(""); // State to track the search term
- 
+
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ transition: "smooth" });
   }, [messages]);
 
   useEffect(() => {
-    const socket = io("http://localhost:1000");
+    const socket = io(host);
     socketRef.current = socket;
 
     socket.on("connect", () => {
@@ -138,14 +135,14 @@ export default function ChatContainer({ currentChat, currentUser }) {
     }
   };
 
-  
+
   return (
     <>
       {currentChat && (
-        
-        <div className="chat-container">          
+
+        <div className="chat-container">
           <div className="chat-header">
-            
+
             <div className="user-details">
               <div className="avtar">
                 <img
@@ -173,23 +170,23 @@ export default function ChatContainer({ currentChat, currentUser }) {
                 </div>
               </div>
               <div className="search">
-              <FindInPageIcon   onClick={handleSearchClick} />
+                <FindInPageIcon onClick={handleSearchClick} />
               </div>
-            
+
               {showSearchInputBar && (
-                <input type="text" placeholder="Search..."  onChange={handleSearchChange}
+                <input type="text" placeholder="Search..." onChange={handleSearchChange}
                 /> // Render search input bar
               )}
-              
+
             </div>
           </div>
-{/* 
+          {/* 
            <div className="image">
            <img src={watsapp_dark} alt="watsapp_dark"/>
           </div>  */}
 
 
-         
+
 
 
           <div className="chat-messages">
@@ -197,9 +194,8 @@ export default function ChatContainer({ currentChat, currentUser }) {
               <div
                 ref={scrollRef}
                 key={uuidv4()}
-                className={`message${
-                  message.fromSelf ? " sended" : " recieved"
-                }`}
+                className={`message${message.fromSelf ? " sended" : " recieved"
+                  }`}
               >
                 {index === hoveredMessageIndex && (
                   <div className="reaction-icons">
@@ -210,17 +206,17 @@ export default function ChatContainer({ currentChat, currentUser }) {
                   </div>
                 )}
                 {index === 0 ||
-                getDay(message.timestamp) !==
+                  getDay(message.timestamp) !==
                   getDay(messages[index - 1].timestamp) ? (
                   <div className="day">{getDay(message.timestamp)}</div>
                 ) : null}
                 <div
                   className="content"
-                  onClick={()=>handleContentMouseEnter(index)}
-                  onDoubleClick={()=>handleContentMouseLeave(index)}       
-                  // onMouseEnter={() => handleContentMouseEnter(index)}
-                  // onMouseLeave={handleContentMouseLeave}
-                          
+                  onClick={() => handleContentMouseEnter(index)}
+                  onDoubleClick={() => handleContentMouseLeave(index)}
+                // onMouseEnter={() => handleContentMouseEnter(index)}
+                // onMouseLeave={handleContentMouseLeave}
+
                 >
                   <p>
                     {/* {message.message} */}
@@ -237,7 +233,7 @@ export default function ChatContainer({ currentChat, currentUser }) {
               </div>
             ))}
           </div>
-              <ChatInput handleSendMsg={handleSendMsg} />
+          <ChatInput handleSendMsg={handleSendMsg} />
         </div>
       )}
     </>
