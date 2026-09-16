@@ -1,62 +1,64 @@
-import React, { useState,useEffect } from 'react'
-import { useNavigate} from 'react-router-dom'
-import { ToastContainer,toast } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css'
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ToastContainer, toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 import axios from 'axios';
-import {Buffer} from 'buffer';
-import logo from '../images/cl.gif'
-import  {AvtarRoute} from '../utils/APIRoutes';
+import multiavatar from '@multiavatar/multiavatar/esm';
+import logo from '../images/cl.gif';
+import { AvtarRoute } from '../utils/APIRoutes';
 import styled from 'styled-components';
 import Logout from '../components/Logout';
+
 const Avtar = () => {
-    const api='https://api.multiavatar.com/45678945';
-    const navigate=useNavigate();
-    const [avtars,setAvtars]=useState([]);
-    const [isLoading,setIsLoading]=useState(true);
-    const [selectedAvtar,setSelectedAvtar]=useState(undefined);
-    const toastOptions={
-        position:'bottom-right',
-        autoClose:8000,
-        pauseOnHover:true,
-        draggable:true,
-        theme:'dark',
+    const navigate = useNavigate();
+    const [avtars, setAvtars] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [selectedAvtar, setSelectedAvtar] = useState(undefined);
+    const toastOptions = {
+        position: 'bottom-right',
+        autoClose: 8000,
+        pauseOnHover: true,
+        draggable: true,
+        theme: 'dark',
     };
-    useEffect(()=>{
-        if(!localStorage.getItem('chat-app-user')){
+
+    useEffect(() => {
+        if (!localStorage.getItem('chat-app-user')) {
             navigate('/login');
         }
-    },[]);
-    const setProfilePicture=async()=>{
-        if(selectedAvtar===undefined){
-  toast.error('pls select an avtar',toastOptions);
-        }else{
-            const user=await JSON.parse(localStorage.getItem('chat-app-user'));
-            const{data}=await axios.post(`${AvtarRoute}/${user._id}`,{
-                image:avtars[selectedAvtar],
+    }, []);
+
+    const setProfilePicture = async () => {
+        if (selectedAvtar === undefined) {
+            toast.error('pls select an avtar', toastOptions);
+        } else {
+            const user = await JSON.parse(localStorage.getItem('chat-app-user'));
+            const { data } = await axios.post(`${AvtarRoute}/${user._id}`, {
+                image: avtars[selectedAvtar],
             });
             console.log(data);
-            if(data.isSet){
-                user.isAvtarImageSet=true;
-                user.avtarImage=data.image;
-                localStorage.setItem('chat-app-user',JSON.stringify(user));
+            if (data.isSet) {
+                user.isAvtarImageSet = true;
+                user.avtarImage = data.image;
+                localStorage.setItem('chat-app-user', JSON.stringify(user));
                 navigate('/');
-            }else{
+            } else {
                 toast.error("error setting avtar.pls try again", toastOptions);
             }
         }
     };
-    useEffect(()=>{
-        async function fetchData(){
-        const data=[];
-        for(let i=0;i<4;i++){
-            const image=await axios.get(`${api}/${Math.round(Math.random() * 1000)}`);
-            const buffer=new Buffer(image.data);
-            data.push(buffer.toString('base64'));
+
+    useEffect(() => {
+        const data = [];
+        for (let i = 0; i < 4; i++) {
+            const randomSeed = Math.round(Math.random() * 1000).toString();
+            const svgCode = multiavatar(randomSeed);
+            const base64Avatar = btoa(unescape(encodeURIComponent(svgCode)));
+            data.push(base64Avatar);
         }
         setAvtars(data);
         setIsLoading(false);
-    }fetchData();
-    },[]);
+    }, []);
   return (
   <>
   {
