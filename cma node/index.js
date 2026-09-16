@@ -16,12 +16,12 @@ app.use(cors({
   // origin: "http://localhost:3001", // Change this to the origin of your frontend server 
 }));
 app.use(express.json());
-app.use('/uploads',express.static('./uploads'));
+app.use('/uploads', express.static('./uploads'));
 app.use("/api/auth", userRoutes);
 app.use("/api/messages", messageRoute);
 
 const PORT = process.env.PORT || 1000;
-const MONGO_URI = process.env.MONGO_URI || "mongodb://0.0.0.0:27017/chats";
+const MONGO_URI = process.env.MONGO_URI;
 
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
@@ -47,7 +47,7 @@ const onlineUsers = new Map();
 
 const io = socket(server, {
   cors: {
-    origin: "http://localhost:3000",
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
     credentials: true,
   },
 });
@@ -58,9 +58,9 @@ io.on("connection", (socket) => {
     // Notify all clients about the updated online status
     socket.emit("user-status", true);
 
-      // Notify other clients about the updated online status of this user
-      socket.broadcast.emit("user-status", userId, true);
- 
+    // Notify other clients about the updated online status of this user
+    socket.broadcast.emit("user-status", userId, true);
+
   });
 
   socket.on("disconnect", () => {
@@ -69,7 +69,7 @@ io.on("connection", (socket) => {
         onlineUsers.delete(userId);
         // Notify all clients about the updated online status
         socket.broadcast.emit("user-status", userId, false);
-    
+
       }
     }
   });
