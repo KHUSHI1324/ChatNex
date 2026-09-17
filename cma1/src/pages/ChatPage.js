@@ -40,6 +40,54 @@ function ChatPage() {
     fetchData();
   }, []);
 
+  const formatPreviewMessage = (msgText, imgpath) => {
+    let preview = msgText || "";
+    if (imgpath) {
+      if (msgText && msgText !== "📷 Photo") {
+        const isFilename = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(msgText.trim());
+        if (isFilename) {
+          preview = "📷 Photo";
+        } else if (msgText.startsWith("📷 Photo: ")) {
+          preview = msgText;
+        } else {
+          preview = `📷 Photo: ${msgText}`;
+        }
+      } else {
+        preview = "📷 Photo";
+      }
+    }
+    return preview;
+  };
+
+  const updateContactLastMessage = (targetContactId, msgText, imgpath, senderId, timestamp = new Date().toISOString()) => {
+    if (!targetContactId) return;
+    const preview = formatPreviewMessage(msgText, imgpath);
+
+    setContacts((prevContacts) => {
+      const updatedContacts = prevContacts.map((contact) => {
+        if (contact._id?.toString() === targetContactId?.toString()) {
+          return {
+            ...contact,
+            latestMessage: {
+              message: preview,
+              imgpath: imgpath,
+              timestamp: timestamp,
+              sender: senderId,
+            },
+            lastMessageTimestamp: timestamp,
+          };
+        }
+        return contact;
+      });
+
+      return [...updatedContacts].sort((a, b) => {
+        const timeA = new Date(a.lastMessageTimestamp || 0).getTime();
+        const timeB = new Date(b.lastMessageTimestamp || 0).getTime();
+        return timeB - timeA;
+      });
+    });
+  };
+
   useEffect(() => {
     if (currentUser) {
       socket.current = io(host);
@@ -57,6 +105,7 @@ function ChatPage() {
         console.log("[FRONTEND] msg-recieve event received at ChatPage:", data);
         const senderId = typeof data === "object" ? data.from : null;
         const msgText = typeof data === "object" ? (data.message || data.msg) : data;
+        const imgpath = typeof data === "object" ? data.imgpath : null;
         const timestamp = new Date().toISOString();
 
         // Check if message is from the active open chat
@@ -64,6 +113,7 @@ function ChatPage() {
           setArrivalMessage({
             fromSelf: false,
             message: msgText,
+            imgpath: imgpath,
             timestamp,
           });
           // Mark immediately as read in DB if currently viewing this chat
@@ -78,6 +128,11 @@ function ChatPage() {
               [senderId]: (prev[senderId] || 0) + 1,
             }));
           }
+        }
+
+        // Live update sidebar contact's latestMessage preview and re-sort list to top
+        if (senderId) {
+          updateContactLastMessage(senderId, msgText, imgpath, senderId, timestamp);
         }
       });
 
@@ -145,7 +200,7 @@ function ChatPage() {
             {isLoaded && currentChat === undefined ? (
               <Welcome currentUser={currentUser} />
             ) : (
-              <ChatContainer currentChat={currentChat} currentUser={currentUser} socket={socket} arrivalMessage={arrivalMessage} />
+              <ChatContainer currentChat={currentChat} currentUser={currentUser} socket={socket} arrivalMessage={arrivalMessage} onMessageSent={updateContactLastMessage} />
             )}
           </div>
         </div>

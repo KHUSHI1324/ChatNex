@@ -48,9 +48,10 @@ export default function Contacts({ contacts, currentUser, changeChat, unreadMess
     if (contacts && contacts.length > 0) {
       const latestMessagesMap = {};
       contacts.forEach((contact) => {
-        if (contact.latestMessage && contact.latestMessage.message) {
+        if (contact.latestMessage && (contact.latestMessage.message || contact.latestMessage.imgpath)) {
           latestMessagesMap[contact._id] = {
             ...contact.latestMessage,
+            message: contact.latestMessage.message || "",
             timestamp: contact.latestMessage.timestamp ? formatTimestamp(contact.latestMessage.timestamp) : "",
           };
         } else {
@@ -72,7 +73,7 @@ export default function Contacts({ contacts, currentUser, changeChat, unreadMess
   }, [currentUser]);
 
   const changeCurrentChat = (index, contact) => {
-    setCurrentSelected(index);
+    setCurrentSelected(contact._id);
     changeChat(contact);
   };
 
@@ -89,8 +90,8 @@ export default function Contacts({ contacts, currentUser, changeChat, unreadMess
           {contacts &&
             contacts.map((contact, index) => (
               <div
-                className={`contact ${index === currentSelected ? 'selected' : ''}`}
-                key={index}
+                className={`contact ${contact._id === currentSelected ? 'selected' : ''}`}
+                key={contact._id || index}
                 onClick={() => changeCurrentChat(index, contact)}
               >
                 <div className='avtar'>

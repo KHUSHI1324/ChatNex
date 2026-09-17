@@ -58,8 +58,11 @@ exports.getAllMessage = async (req, res, next) => {
 
     const projectedMessages = messages.map((msg) => {
       return {
+        _id: msg._id,
         fromSelf: msg.sender.toString() === from,
-        message: msg.message.text,
+        message: msg.message?.text || "",
+        imgpath: msg.message?.imgpath || "",
+        read: msg.read,
         timestamp: msg.createdAt,
       };
     });
@@ -70,24 +73,35 @@ exports.getAllMessage = async (req, res, next) => {
 };
 
 // controllers/mediaController.js
-exports.uploadMedia = async (req, res) => {
+exports.uploadMedia = async (req, res, next) => {
   const file = req.file;
-  const { from, to} = req.body;
-  if(!file|| !file.path){
-    res.status(401).json({status:401,error:"no file uploaded"})
-   }else{
-    const userdata = new messageModel({
-      // users:[from, to],
-      // sender:from,
-      imgpath: req.file.path
-     });
-   
+  const { from, to, message } = req.body;
+  if (!file || !file.path) {
+    return res.status(400).json({ status: 400, error: "no file uploaded" });
+  }
+
   try {
-   const finaldata = await userdata.save();
-   res.status(201).json({status:201,finaldata});
+    const normalizedPath = file.path.replace(/\\/g, "/");
+    console.log("[BACKEND UPLOADMEDIA SAVING TO DB]", {
+      "message.text": message || "",
+      "message.imgpath": normalizedPath,
+      from,
+      to,
+    });
+    const userdata = new messageModel({
+      message: {
+        text: message || "",
+        imgpath: normalizedPath,
+      },
+      users: [from, to],
+      sender: new mongoose.Types.ObjectId(from),
+      read: false,
+    });
+
+    const finaldata = await userdata.save();
+    return res.status(201).json({ status: 201, finaldata, imgpath: normalizedPath });
   } catch (error) {
     console.error('Error uploading media:', error);
-    return res.status(500).json({ error: 'An error occuring while saving the msg' });
+    return res.status(500).json({ error: 'An error occurred while saving the media message' });
   }
 };
-}

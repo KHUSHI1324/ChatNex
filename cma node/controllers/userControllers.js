@@ -103,7 +103,32 @@ module.exports.getContactsWithLastMessage = async (req, res, next) => {
                         {
                             $project: {
                                 _id: 1,
-                                message: "$message.text",
+                                message: {
+                                    $cond: {
+                                        if: {
+                                            $and: [
+                                                { $ne: ["$message.imgpath", null] },
+                                                { $ne: ["$message.imgpath", ""] }
+                                            ]
+                                        },
+                                        then: {
+                                            $cond: {
+                                                if: {
+                                                    $and: [
+                                                        { $ne: ["$message.text", null] },
+                                                        { $ne: ["$message.text", ""] },
+                                                        { $ne: ["$message.text", "📷 Photo"] },
+                                                        { $not: [{ $regexMatch: { input: "$message.text", regex: "\\.(png|jpe?g|gif|webp|bmp|svg)$", options: "i" } }] }
+                                                    ]
+                                                },
+                                                then: { $concat: ["📷 Photo: ", "$message.text"] },
+                                                else: "📷 Photo"
+                                            }
+                                        },
+                                        else: { $ifNull: ["$message.text", ""] }
+                                    }
+                                },
+                                imgpath: "$message.imgpath",
                                 sender: 1,
                                 createdAt: 1
                             }
@@ -149,6 +174,7 @@ module.exports.getContactsWithLastMessage = async (req, res, next) => {
                     isAvtarImageSet: 1,
                     latestMessage: {
                         message: "$lastMessageObj.message",
+                        imgpath: "$lastMessageObj.imgpath",
                         timestamp: "$lastMessageObj.createdAt",
                         sender: "$lastMessageObj.sender"
                     },

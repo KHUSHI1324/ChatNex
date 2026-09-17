@@ -5,10 +5,10 @@ import ChatInput from "./ChatInput";
 import CallIcon from '@mui/icons-material/Call';
 import VideoCallIcon from '@mui/icons-material/VideoCall';
 import FindInPageIcon from '@mui/icons-material/FindInPage';
-import { sendMessageRoute, getAllMessagesRoute } from "../utils/APIRoutes";
+import { sendMessageRoute, getAllMessagesRoute, imageapi, host } from "../utils/APIRoutes";
 import { v4 as uuidv4 } from "uuid";
 
-export default function ChatContainer({ currentChat, currentUser, socket, arrivalMessage }) {
+export default function ChatContainer({ currentChat, currentUser, socket, arrivalMessage, onMessageSent }) {
   const [messages, setMessages] = useState([]);
   const [onlineUsers, setOnlineUsers] = useState(new Map()); // New state for online/offline status
   const [hoveredMessageIndex, setHoveredMessageIndex] = useState(null);
@@ -47,25 +47,76 @@ export default function ChatContainer({ currentChat, currentUser, socket, arriva
     fetchData();
   }, [currentChat, currentUser]);
 
-  const handleSendMsg = async (msg) => {
+  const handleSendMsg = async (msg, image) => {
     if (!currentUser || !currentUser._id) {
       return;
     }
-    await axios.post(sendMessageRoute, {
-      from: currentUser._id,
-      to: currentChat._id,
-      message: msg,
-    });
-    if (socket?.current) {
-      socket.current.emit("send-msg", {
+
+    if (image) {
+      const formData = new FormData();
+      formData.append("photo", image);
+      formData.append("from", currentUser._id);
+      formData.append("to", currentChat._id);
+      formData.append("message", msg || "");
+
+      console.log("[FRONTEND UPLOAD PAYLOAD]", {
+        photo: image?.name,
+        from: currentUser._id,
+        to: currentChat._id,
+        message: msg || "",
+      });
+
+      try {
+        const { data } = await axios.post(imageapi, formData, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+
+        const imgpath = data.imgpath || data.finaldata?.message?.imgpath;
+        const timestamp = new Date().toISOString();
+
+        // Immediately update sender's own sidebar preview & top-ranking
+        if (onMessageSent) {
+          onMessageSent(currentChat._id, msg, imgpath, currentUser._id, timestamp);
+        }
+
+        if (socket?.current) {
+          socket.current.emit("send-msg", {
+            from: currentUser._id,
+            to: currentChat._id,
+            message: msg || "📷 Photo",
+            imgpath: imgpath,
+          });
+        }
+
+        const newMessage = { fromSelf: true, message: msg, imgpath: imgpath, timestamp };
+        setMessages((prev) => [...prev, newMessage]);
+      } catch (err) {
+        console.error("Error uploading media message:", err);
+      }
+    } else {
+      await axios.post(sendMessageRoute, {
         from: currentUser._id,
         to: currentChat._id,
         message: msg,
       });
+
+      const timestamp = new Date().toISOString();
+
+      // Immediately update sender's own sidebar preview & top-ranking
+      if (onMessageSent) {
+        onMessageSent(currentChat._id, msg, null, currentUser._id, timestamp);
+      }
+
+      if (socket?.current) {
+        socket.current.emit("send-msg", {
+          from: currentUser._id,
+          to: currentChat._id,
+          message: msg,
+        });
+      }
+      const newMessage = { fromSelf: true, message: msg, timestamp };
+      setMessages((prev) => [...prev, newMessage]);
     }
-    const timestamp = new Date().toISOString(); // Update timestamp to current time
-    const newMessage = { fromSelf: true, message: msg, timestamp };
-    setMessages((prev) => [...prev, newMessage]);
   };
 
   useEffect(() => {
@@ -201,15 +252,29 @@ export default function ChatContainer({ currentChat, currentUser, socket, arriva
                   className="content"
                   onClick={() => handleContentMouseEnter(index)}
                   onDoubleClick={() => handleContentMouseLeave(index)}
-                // onMouseEnter={() => handleContentMouseEnter(index)}
-                // onMouseLeave={handleContentMouseLeave}
-
                 >
-                  <p>
-                    {/* {message.message} */}
-                    {highlightSearchTerm(message)}
-                    <br />
-                    <span>
+                  {message.imgpath && (
+                    <img
+                      src={`${host}/${message.imgpath}`}
+                      alt="attachment"
+                      style={{
+                        maxWidth: "100%",
+                        maxHeight: "260px",
+                        borderRadius: "8px",
+                        marginBottom: message.message ? "6px" : "0px",
+                        display: "block",
+                        cursor: "pointer",
+                      }}
+                      onClick={() => window.open(`${host}/${message.imgpath}`, "_blank")}
+                    />
+                  )}
+                  {message.message && message.message !== "📷 Photo" && (
+                    <p>
+                      {highlightSearchTerm(message)}
+                    </p>
+                  )}
+                  <p style={{ margin: "0" }}>
+                    <span style={{ fontSize: "10px", opacity: 0.7 }}>
                       {new Date(message.timestamp).toLocaleTimeString([], {
                         hour: "2-digit",
                         minute: "2-digit",

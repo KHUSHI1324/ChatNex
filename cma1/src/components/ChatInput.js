@@ -15,46 +15,30 @@ export default function ChatInput({handleSendMsg}) {
   };
 
   const handleEmojiClick = (event, emojiObject) => {
-    console.log(emojiObject);
     const newMsg = msg + emojiObject.emoji;
-    // setMsg(prevMsg =>prevMsg+emojiObject.emoji);
     setMsg(newMsg);
   };
 
   const handleImageChange = (e) => {
     const selectedImage = e.target.files[0];
-    setImage(selectedImage);
-   
-    const name=e.target.files[0].name;
-    setMsg(name);
- 
+    if (selectedImage) {
+      setImage(selectedImage);
+    }
   };
 
   const sendChat = async(e) => {
     e.preventDefault();
-    if (msg.trim().length > 0 || image ) { // Check if there's a message or an image
-      handleSendMsg(msg,image); // Pass the image to the send message function
+    if (msg.trim().length > 0 || image) { // Check if there's a message or an image
+      handleSendMsg(msg.trim(), image); // Pass the image to the send message function
       setMsg('');
       setImage(null);  // Clear the selected image after sending
-      var formData = new FormData();
-      formData.append('photo',image);
     }
-
-    const config = {
-      headers:{
-        'Content-Type':'multipart/form-data'
-      }
-    }
-
-    // const res = await axios.post(imageapi,formData,config); 
-    // console.log(res);
-  }
+  };
 
   return (
     <div className='chat-Input'>
         <div className="button-container">
           <div className='head'>
-            {/* <span>hi</span> */}
         <div className="emoji">
           <BsEmojiSmileFill onClick={handleEmojiPickerHideShow}/>
          { showEmojiPicker && (
@@ -63,17 +47,22 @@ export default function ChatInput({handleSendMsg}) {
              </div>
             )}
         </div>
-        <input type='file' style={{display:"none"}} id='file' name='photo'  onChange={handleImageChange} accept="image/*"/>
+        <input type='file' style={{display:"none"}} id='file' name='photo' onChange={handleImageChange} accept="image/*"/>
         <label htmlFor='file'>
             <img src={Attach} alt='Attach'/>
         </label>
         </div>
         </div>
        <form className='input-container' onSubmit={sendChat}>
-        <input type='text' placeholder='Type your message' value={msg} onChange={(e)=>setMsg(e.target.value)}/>
+        {image && (
+          <div style={{ display: 'flex', alignItems: 'center', backgroundColor: '#202c33', padding: '2px 8px', borderRadius: '4px', marginRight: '6px', fontSize: '12px', color: '#00a884', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span>📷 {image.name}</span>
+            <span onClick={() => setImage(null)} style={{ cursor: 'pointer', marginLeft: '6px', color: '#ff6b6b', fontWeight: 'bold' }}>✕</span>
+          </div>
+        )}
+        <input type='text' placeholder={image ? 'Add a caption (optional)...' : 'Type your message'} value={msg} onChange={(e)=>setMsg(e.target.value)}/>
         <button className='submit'>
             <IoMdSend/>
-            {/* <SendIcon/> */}
         </button>
        </form>
     </div>

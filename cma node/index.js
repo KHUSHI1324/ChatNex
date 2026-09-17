@@ -21,20 +21,35 @@ app.use("/api/auth", userRoutes);
 app.use("/api/messages", messageRoute);
 
 const PORT = process.env.PORT || 1000;
-const MONGO_URI = process.env.MONGO_URI;
 
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
 
-mongoose
-  .connect(MONGO_URI)
-  .then(() => {
-    console.log("MongoDB connected successfully");
-  })
-  .catch((error) => {
-    console.error("MongoDB connection error:", error);
-  });
+const MONGO_URI = process.env.MONGO_URI || "mongodb://0.0.0.0:27017/chats";
+
+const connectWithRetry = (attempt = 1, maxAttempts = 5) => {
+  console.log(`MongoDB connection attempt ${attempt} of ${maxAttempts}...`);
+
+  mongoose
+    .connect(MONGO_URI, {
+      serverSelectionTimeoutMS: 30000,
+    })
+    .then(() => {
+      console.log("MongoDB connected successfully");
+    })
+    .catch((error) => {
+      console.error(`MongoDB connection error (attempt ${attempt} of ${maxAttempts}):`, error.message || error);
+      if (attempt < maxAttempts) {
+        console.log("Retrying connection in 5 seconds...");
+        setTimeout(() => connectWithRetry(attempt + 1, maxAttempts), 5000);
+      } else {
+        console.error("Max MongoDB connection attempts reached. Could not connect to database.");
+      }
+    });
+};
+
+connectWithRetry();
 
 // Middleware to track online users
 const onlineUsers = new Map();
@@ -75,6 +90,7 @@ io.on("connection", (socket) => {
         from: data.from,
         to: data.to,
         message: data.message || data.msg,
+        imgpath: data.imgpath || null,
       };
       console.log(`[EMITTING MSG-RECIEVE] Emitting to socket ${sendUserSocket} with payload:`, payload);
       socket.to(sendUserSocket).emit("msg-recieve", payload);
