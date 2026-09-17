@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import Profile from './Profile';
 import Search from './Search';
+import GroupsIcon from '@mui/icons-material/Groups';
+import { getAvatarSrc } from '../utils/avatarHelper';
 
 export default function Contacts({ contacts, currentUser, changeChat, unreadMessages }) {
   const [currentUserName, setCurrentUserName] = useState(undefined);
@@ -54,6 +56,12 @@ export default function Contacts({ contacts, currentUser, changeChat, unreadMess
             message: contact.latestMessage.message || "",
             timestamp: contact.latestMessage.timestamp ? formatTimestamp(contact.latestMessage.timestamp) : "",
           };
+        } else if (contact.isGroup) {
+          const count = contact.members ? contact.members.length : 0;
+          latestMessagesMap[contact._id] = {
+            message: `${count} members`,
+            timestamp: contact.lastMessageTimestamp ? formatTimestamp(contact.lastMessageTimestamp) : "",
+          };
         } else {
           latestMessagesMap[contact._id] = null;
         }
@@ -78,161 +86,191 @@ export default function Contacts({ contacts, currentUser, changeChat, unreadMess
   };
 
   return (
-    <Containers>
-      {currentUserName && currentUserImage && (
-        <div className='brand'>
-          <h3> Chats</h3>
-        </div>
-      )}
-      <div>
-        <Search contacts={contacts} changeChat={changeChat} />
-        <div title='start conv.' className='contacts'>
-          {contacts &&
-            contacts.map((contact, index) => (
+    <div
+      className='contacts-panel'
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        width: '100%',
+        backgroundColor: '#111b21',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Chats Header */}
+      <div
+        className='contacts-header'
+        style={{
+          height: '60px',
+          minHeight: '60px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '0 16px',
+          backgroundColor: '#111b21',
+          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          boxSizing: 'border-box',
+        }}
+      >
+        <h2 style={{ margin: 0, color: '#e9edef', fontSize: '20px', fontWeight: '700', letterSpacing: '0.3px' }}>
+          Chats
+        </h2>
+      </div>
+
+      {/* Search Bar */}
+      <Search contacts={contacts} changeChat={changeChat} />
+
+      {/* Contacts List */}
+      <div
+        className='contacts-scroll-list'
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        {contacts && contacts.length > 0 ? (
+          contacts.map((contact, index) => {
+            const isSelected = contact._id === currentSelected;
+            const unread = (contact.unreadCount || 0) + (unreadMessages?.[contact._id] || 0);
+            const latest = latestMessages[contact._id];
+
+            return (
               <div
-                className={`contact ${contact._id === currentSelected ? 'selected' : ''}`}
                 key={contact._id || index}
                 onClick={() => changeCurrentChat(index, contact)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '12px 16px',
+                  gap: '12px',
+                  cursor: 'pointer',
+                  backgroundColor: isSelected ? '#2a3942' : 'transparent',
+                  borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                  transition: 'background 0.15s',
+                  boxSizing: 'border-box',
+                  width: '100%',
+                }}
+                onMouseEnter={(e) => {
+                  if (!isSelected) e.currentTarget.style.backgroundColor = '#202c33';
+                }}
+                onMouseLeave={(e) => {
+                  if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent';
+                }}
               >
-                <div className='avtar'>
+                {/* Avatar */}
+                <div style={{ position: 'relative', flexShrink: 0 }}>
                   <img
-                    src={`data:image/svg+xml;base64,${contact.avtarImage}`}
-                    alt='avtar'
+                    src={getAvatarSrc(contact.avtarImage)}
+                    alt={contact.username || contact.name}
+                    style={{
+                      width: '45px',
+                      height: '45px',
+                      borderRadius: '50%',
+                      objectFit: 'cover',
+                      display: 'block',
+                      border: contact.isGroup ? '1px solid rgba(0, 168, 132, 0.4)' : '1px solid rgba(255,255,255,0.1)',
+                    }}
                   />
+                  {contact.isGroup && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        bottom: '-2px',
+                        right: '-2px',
+                        backgroundColor: '#00a884',
+                        borderRadius: '50%',
+                        width: '16px',
+                        height: '16px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#111b21',
+                      }}
+                      title="Group"
+                    >
+                      <GroupsIcon style={{ fontSize: '11px' }} />
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <div className='username'>
-                    <p>{contact.username}</p>
-                    {((contact.unreadCount || 0) + (unreadMessages?.[contact._id] || 0)) > 0 && (
+
+                {/* Content info */}
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {/* Row 1: Username + Timestamp */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span
+                      style={{
+                        color: '#e9edef',
+                        fontSize: '15.5px',
+                        fontWeight: unread > 0 ? '600' : '500',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {contact.name || contact.username}
+                    </span>
+                    {latest?.timestamp && (
                       <span
-                        className='unread-badge'
                         style={{
-                          backgroundColor: '#25d366',
-                          color: '#fff',
-                          borderRadius: '12px',
-                          padding: '1px 7px',
-                          fontSize: '11px',
-                          fontWeight: 'bold',
+                          color: unread > 0 ? '#25d366' : '#8696a0',
+                          fontSize: '11.5px',
+                          fontWeight: unread > 0 ? '600' : '400',
+                          whiteSpace: 'nowrap',
                           marginLeft: '6px',
                         }}
                       >
-                        {(contact.unreadCount || 0) + (unreadMessages?.[contact._id] || 0)}
+                        {latest.timestamp}
                       </span>
                     )}
-                    <span className='timestamp'>
-                      {latestMessages[contact._id]?.timestamp}
-                    </span>
                   </div>
-                  <span className='time-status'>{latestMessages[contact._id]?.message}</span>
+
+                  {/* Row 2: Message preview + Unread Badge */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span
+                      style={{
+                        color: unread > 0 ? '#e9edef' : '#8696a0',
+                        fontSize: '13px',
+                        fontWeight: unread > 0 ? '500' : '400',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        flex: 1,
+                        paddingRight: '6px',
+                      }}
+                    >
+                      {latest?.message || (contact.isGroup ? `${contact.members?.length || 0} members` : "Start a conversation")}
+                    </span>
+                    {unread > 0 && (
+                      <span
+                        style={{
+                          backgroundColor: '#25d366',
+                          color: '#111b21',
+                          borderRadius: '10px',
+                          padding: '1px 6px',
+                          fontSize: '11px',
+                          fontWeight: '700',
+                          flexShrink: 0,
+                          minWidth: '18px',
+                          textAlign: 'center',
+                          lineHeight: '16px',
+                        }}
+                      >
+                        {unread}
+                      </span>
+                    )}
+                  </div>
                 </div>
-
-
               </div>
-
-            ))}
-        </div>
+            );
+          })
+        ) : (
+          <div style={{ padding: '24px 16px', textAlign: 'center', color: '#8696a0', fontSize: '13px' }}>
+            No contacts available
+          </div>
+        )}
       </div>
-      <Profile
-        currentUserName={currentUserName}
-        currentUserImage={currentUserImage}
-        email={currentEmail}
-      />
-    </Containers>
+    </div>
   );
 }
-const Containers = styled.div`
-  display: grid;
-  grid-template-rows: 10% 75% 15%;
-  height: 94vh;
-  overflow: hidden;
-  background-color: rgb(16,27,32);
-  border-width: 1.5px 1.5px 0px 0.5px;
-  border-color:whitesmoke;
-  border-style: solid;
-  border-radius: 10px 0px 0px 0px;
-
-  .brand {
-    display: flex;
-    margin: 0px 0px 0px 15px;
-
-    h3 {
-      color: white;
-      text-transform: uppercase;
-    }
-  }
-
-  .contacts {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    overflow: auto;
-    gap: 0.2rem;
-    &::-webkit-scrollbar {
-      width: 0.2rem;
-
-      &-thumb {
-        background-color: grey;
-        width: 0.1rem;
-        border-radius: 0.1rem;
-      }
-   
-    }
-
-    .contact {
-      width: 90%;
-      cursor: pointer;
-      border-radius: 0.2rem;
-      padding: 1px 5px 1px 5px;
-      gap: 1rem;
-      margin: 3px 1px 1px 1px;
-      align-items: center;
-      display: flex;
-
-      &:hover {
-        background-color: rgba(226, 226, 224, 0.884);
-        box-shadow: 2px 3px 9px ;
-        border-color: whitesmoke;
-        border-radius: 0.5rem;
-      }
-
-      .avtar {
-        img {
-          height: 3rem;
-          border: 1.5px solid whitesmoke;
-          border-radius: 5rem;
-        }
-      }
-
-      .username {
-        display:flex;
-         justify-content:center;
-        p {
-          color: white;
-          margin: 0px 0px 0px 0px;
-        }
-       
-        
-        .timestamp {
-          font-size: 12px; /* Adjust the font size as needed */
-          color: grey;
-          display:flex;
-          margin-left:105px;
-          align-items: flex-end;
-          justify-content: flex-end;
-           margin-right: 1px; /* Add some margin for separation */
-        }
-      }
-    }
-    .time-status {
-      font-size:12px;
-      color: grey;
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-    }
-    .selected {
-      background-color: rgb(43,56,66);
-    }
-  }
-`;

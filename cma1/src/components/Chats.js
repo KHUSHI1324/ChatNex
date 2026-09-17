@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import styled from 'styled-components';
-import Msg from '../images/masg.png';
 import MessageIcon from '@mui/icons-material/Message';
+import { getAvatarSrc } from '../utils/avatarHelper';
 export default function Chats({ contacts ,changeChat }) {
   const [showNewPage, setShowNewPage] = useState(false);
   const [currentSelected, setCurrentSelected] = useState(undefined);
@@ -34,7 +34,7 @@ export default function Chats({ contacts ,changeChat }) {
             >
               <div className='avtar'>
                 <img
-                  src={`data:image/svg+xml;base64,${contact.avtarImage}`}
+                  src={getAvatarSrc(contact.avtarImage)}
                   alt='avtar'
                 />
               </div>

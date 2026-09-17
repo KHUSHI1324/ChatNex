@@ -42,20 +42,95 @@ module.exports.login=async(req,res,next)=>{
 }catch(ex){
     next(ex);
  } };
- module.exports.avtar=async(req,res,next)=>{
+  module.exports.avtar=async(req,res,next)=>{
     try{
 const userId=req.params.id;
 const avtarImage=req.body.image;
 const userData=await User.findByIdAndUpdate(userId,{
     isAvtarImageSet:true,
     avtarImage,
-});
+}, { new: true });
 return res.json({isSet: userData.isAvtarImageSet,
                  image: userData.avtarImage,
 });
 }catch(ex){
  next(ex)
 }
+};
+
+module.exports.getUserById = async (req, res, next) => {
+    try {
+        const user = await User.findById(req.params.id).select("-password");
+        if (!user) return res.json({ status: false, msg: "User not found" });
+        return res.json({ status: true, user });
+    } catch (ex) {
+        next(ex);
+    }
+};
+
+module.exports.generateAiAvatar = async (req, res) => {
+    try {
+        const { prompt, style = "3d avatar", seed } = req.body || {};
+        const cleanPrompt = (prompt || "stylish person avatar").trim();
+        const enhancedPrompt = `${cleanPrompt}, ${style} style, clean avatar profile picture, high resolution headshot, centered, vivid colors`;
+        const randomSeed = seed || Math.floor(Math.random() * 1000000);
+        const aiUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedPrompt)}?width=256&height=256&nologo=true&seed=${randomSeed}`;
+
+        console.log(`[AI Avatar] Requesting Pollinations GPU for: "${cleanPrompt}" (seed: ${randomSeed})`);
+
+        const fetchImage = async (url) => {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 18000);
+            try {
+                const response = await fetch(url, {
+                    signal: controller.signal,
+                    headers: { 'User-Agent': 'ChatNex-AI/2.0 (Mozilla/5.0)' }
+                });
+                clearTimeout(timeoutId);
+                return response;
+            } catch (err) {
+                clearTimeout(timeoutId);
+                throw err;
+            }
+        };
+
+        let response = await fetchImage(aiUrl);
+
+        // If rate limited or queue busy (429), wait 1.8s and retry with fresh seed
+        if (response.status === 429) {
+            console.log('[AI Avatar] Pollinations queue busy (429), retrying in 1.8s with fresh seed...');
+            await new Promise(r => setTimeout(r, 1800));
+            const retrySeed = Math.floor(Math.random() * 1000000);
+            const retryUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedPrompt)}?width=256&height=256&nologo=true&seed=${retrySeed}`;
+            response = await fetchImage(retryUrl);
+        }
+
+        if (response.ok) {
+            const buffer = await response.arrayBuffer();
+            if (buffer && buffer.byteLength > 500) {
+                const base64Image = Buffer.from(buffer).toString('base64');
+                const contentType = response.headers.get('content-type') || 'image/jpeg';
+                const dataUrl = `data:${contentType};base64,${base64Image}`;
+                console.log(`[AI Avatar] Successfully generated real AI image (${buffer.byteLength} bytes) for: "${cleanPrompt}"`);
+                return res.json({ status: true, image: dataUrl, source: 'ai' });
+            }
+        }
+        console.warn(`[AI Avatar] Pollinations returned status ${response?.status}`);
+    } catch (err) {
+        console.warn(`[AI Avatar] Pollinations error/timeout: ${err?.message}`);
+    }
+
+    return res.json({ status: false, msg: "AI provider timed out" });
+};
+
+module.exports.logAvatarFallback = async (req, res) => {
+    try {
+        const { seed, reason, prompt } = req.body || {};
+        console.log(`[Avatar Fallback] Pollinations.ai failed/timed out (${reason || 'timeout/network'}). Generated DiceBear local fallback for seed: "${seed || 'unknown'}" (Prompt: "${prompt || 'none'}").`);
+        return res.json({ status: true });
+    } catch (e) {
+        return res.json({ status: false });
+    }
 };
 
 module.exports.getAllUsers=async(req,res,next)=>{
@@ -99,40 +174,7 @@ module.exports.getContactsWithLastMessage = async (req, res, next) => {
                             }
                         },
                         { $sort: { createdAt: -1 } },
-                        { $limit: 1 },
-                        {
-                            $project: {
-                                _id: 1,
-                                message: {
-                                    $cond: {
-                                        if: {
-                                            $and: [
-                                                { $ne: ["$message.imgpath", null] },
-                                                { $ne: ["$message.imgpath", ""] }
-                                            ]
-                                        },
-                                        then: {
-                                            $cond: {
-                                                if: {
-                                                    $and: [
-                                                        { $ne: ["$message.text", null] },
-                                                        { $ne: ["$message.text", ""] },
-                                                        { $ne: ["$message.text", "📷 Photo"] },
-                                                        { $not: [{ $regexMatch: { input: "$message.text", regex: "\\.(png|jpe?g|gif|webp|bmp|svg)$", options: "i" } }] }
-                                                    ]
-                                                },
-                                                then: { $concat: ["📷 Photo: ", "$message.text"] },
-                                                else: "📷 Photo"
-                                            }
-                                        },
-                                        else: { $ifNull: ["$message.text", ""] }
-                                    }
-                                },
-                                imgpath: "$message.imgpath",
-                                sender: 1,
-                                createdAt: 1
-                            }
-                        }
+                        { $limit: 1 }
                     ],
                     as: "lastMessageData"
                 }
@@ -161,7 +203,7 @@ module.exports.getContactsWithLastMessage = async (req, res, next) => {
             },
             {
                 $addFields: {
-                    lastMessageObj: { $arrayElemAt: ["$lastMessageData", 0] },
+                    lastMessageDoc: { $arrayElemAt: ["$lastMessageData", 0] },
                     unreadCountVal: { $ifNull: [{ $arrayElemAt: ["$unreadData.count", 0] }, 0] }
                 }
             },
@@ -172,27 +214,96 @@ module.exports.getContactsWithLastMessage = async (req, res, next) => {
                     email: 1,
                     avtarImage: 1,
                     isAvtarImageSet: 1,
-                    latestMessage: {
-                        message: "$lastMessageObj.message",
-                        imgpath: "$lastMessageObj.imgpath",
-                        timestamp: "$lastMessageObj.createdAt",
-                        sender: "$lastMessageObj.sender"
-                    },
-                    lastMessageTimestamp: {
-                        $ifNull: ["$lastMessageObj.createdAt", new Date(0)]
-                    },
+                    lastMessageDoc: 1,
                     unreadCount: "$unreadCountVal"
                 }
             },
             {
                 $sort: {
-                    lastMessageTimestamp: -1,
+                    "lastMessageDoc.createdAt": -1,
                     username: 1
                 }
             }
         ]);
 
-        return res.json(contacts);
+        const formattedContacts = contacts.map(contact => {
+            const lastMsg = contact.lastMessageDoc;
+            let preview = "";
+            let imgpath = "";
+            let files = [];
+            let timestamp = null;
+            let sender = null;
+
+            if (lastMsg) {
+                timestamp = lastMsg.createdAt;
+                sender = lastMsg.sender;
+                files = lastMsg.message?.files || [];
+                imgpath = lastMsg.message?.imgpath || "";
+                const text = lastMsg.message?.text || "";
+
+                if (files.length > 0) {
+                    const count = files.length;
+                    const allImages = files.every(f => f.fileType === "image" || (!f.fileType && /\.(png|jpe?g|webp|bmp|svg)$/i.test(f.url || f.filename || "")));
+                    const single = files[0];
+                    const singleExt = (single.filename || single.url || "").split(".").pop().toLowerCase();
+                    let prefix = "";
+                    if (count > 1) {
+                        prefix = allImages ? `📷 ${count} photos` : `📎 ${count} files`;
+                    } else {
+                        if (single.fileType === "video" || /\.(mp4|webm|mov|mkv|avi|ogg)$/i.test(single.url || single.filename || "")) prefix = "🎥 Video";
+                        else if (single.fileType === "gif" || singleExt === "gif") prefix = "👾 GIF";
+                        else if (single.fileType === "image") prefix = "📷 Photo";
+                        else if (single.fileType === "pdf" || single.fileType === "doc" || ["pdf", "doc", "docx"].includes(singleExt)) prefix = "📄 Document";
+                        else if (single.fileType === "sheet" || ["xls", "xlsx", "csv"].includes(singleExt)) prefix = "📊 Spreadsheet";
+                        else prefix = "📎 File";
+                    }
+
+                    if (text && text.trim() && !text.startsWith("📷") && !text.startsWith("🎥") && !text.startsWith("👾") && !text.startsWith("📄") && !text.startsWith("📊") && !text.startsWith("📎") && !/\.(png|jpe?g|gif|webp|bmp|svg|mp4|webm|mov|pdf|docx?|xlsx?|csv)$/i.test(text.trim())) {
+                        preview = `${prefix}: ${text.trim()}`;
+                    } else if (text && (text.startsWith("📷") || text.startsWith("🎥") || text.startsWith("👾") || text.startsWith("📄") || text.startsWith("📊") || text.startsWith("📎"))) {
+                        preview = text;
+                    } else {
+                        preview = prefix;
+                    }
+                } else if (imgpath) {
+                    const ext = (imgpath.split(".").pop() || "").toLowerCase();
+                    let prefix = "📷 Photo";
+                    if (["mp4", "webm", "mov", "mkv", "avi"].includes(ext)) prefix = "🎥 Video";
+                    else if (ext === "gif") prefix = "👾 GIF";
+                    else if (["pdf", "doc", "docx"].includes(ext)) prefix = "📄 Document";
+                    else if (["xls", "xlsx", "csv"].includes(ext)) prefix = "📊 Spreadsheet";
+
+                    if (text && text.trim() && !text.startsWith("📷") && !text.startsWith("🎥") && !text.startsWith("👾") && !text.startsWith("📄") && !text.startsWith("📊") && !text.startsWith("📎") && !/\.(png|jpe?g|gif|webp|bmp|svg|mp4|webm|mov|pdf|docx?|xlsx?|csv)$/i.test(text.trim())) {
+                        preview = `${prefix}: ${text.trim()}`;
+                    } else if (text && (text.startsWith("📷") || text.startsWith("🎥") || text.startsWith("👾") || text.startsWith("📄") || text.startsWith("📊") || text.startsWith("📎"))) {
+                        preview = text;
+                    } else {
+                        preview = prefix;
+                    }
+                } else {
+                    preview = text || "";
+                }
+            }
+
+            return {
+                _id: contact._id,
+                username: contact.username,
+                email: contact.email,
+                avtarImage: contact.avtarImage,
+                isAvtarImageSet: contact.isAvtarImageSet,
+                latestMessage: {
+                    message: preview,
+                    imgpath: imgpath,
+                    files: files,
+                    timestamp: timestamp,
+                    sender: sender
+                },
+                lastMessageTimestamp: timestamp || new Date(0),
+                unreadCount: contact.unreadCount
+            };
+        });
+
+        return res.json(formattedContacts);
     } catch (ex) {
         next(ex);
     }

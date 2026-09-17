@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import styled from 'styled-components';
-import call from '../images/call.png';
 import CallIcon from '@mui/icons-material/Call';
+import { getAvatarSrc } from '../utils/avatarHelper';
 
 export default function Call({ contacts }) {
   const [showNewPage, setShowNewPage] = useState(false);
@@ -21,7 +21,7 @@ export default function Call({ contacts }) {
           {/* Render all contacts */}
           {contacts.map((contact, index) => (
             <div title='Contact' className='contact' key={index}>
-              <img src={`data:image/svg+xml;base64,${contact.avtarImage}`} alt='Avatar' />
+              <img src={getAvatarSrc(contact.avtarImage)} alt='Avatar' />
               <p>{contact.username}</p>
             </div>
           ))}

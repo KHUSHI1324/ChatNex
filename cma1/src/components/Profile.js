@@ -1,71 +1,565 @@
-import React ,{useState} from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import styled from 'styled-components';
-import profile from '../images/p.png';
+import AccountCircleIcon from '@mui/icons-material/AccountCircle';
+import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import CloseIcon from '@mui/icons-material/Close';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import CircularProgress from '@mui/material/CircularProgress';
+import axios from 'axios';
+import { AvtarRoute } from '../utils/APIRoutes';
+import { getAvatarSrc } from '../utils/avatarHelper';
+import { MODERN_AVATARS, generateCustomAiAvatar } from '../utils/avatarCollection';
 import Logout from './Logout';
 
-export default function Profile({ currentUserName, currentUserImage, email }) {
+export default function Profile({
+  currentUser,
+  currentUserName,
+  currentUserImage,
+  email,
+  onUpdateAvatar,
+}) {
   const [showProfile, setShowProfile] = useState(false);
+  const [isHoveringAvatar, setIsHoveringAvatar] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadSuccess, setUploadSuccess] = useState(false);
+  const [showAiModal, setShowAiModal] = useState(false);
+
+  // AI Modal states
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiPreview, setAiPreview] = useState(null);
+  const [selectedPreset, setSelectedPreset] = useState(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isSavingAvatar, setIsSavingAvatar] = useState(false);
+
+  const fileInputRef = useRef(null);
+  const profileRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (profileRef.current && !profileRef.current.contains(event.target)) {
+        setShowProfile(false);
+      }
+    };
+
+    if (showProfile) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showProfile]);
 
   const handleClick = () => {
-    setShowProfile(prevState => !prevState); // Toggle the state
+    setShowProfile((prevState) => !prevState);
+  };
+
+  const handleAvatarFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentUser?._id) return;
+
+    setIsUploading(true);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const result = reader.result;
+
+        const res = await axios.post(`${AvtarRoute}/${currentUser._id}`, {
+          image: result,
+        });
+
+        if (res.data?.isSet) {
+          const updatedUser = {
+            ...currentUser,
+            isAvtarImageSet: true,
+            avtarImage: res.data.image,
+          };
+          localStorage.setItem('chat-app-user', JSON.stringify(updatedUser));
+          if (onUpdateAvatar) {
+            onUpdateAvatar(res.data.image);
+          }
+          setUploadSuccess(true);
+          setTimeout(() => setUploadSuccess(false), 3000);
+        }
+      } catch (err) {
+        console.error('Error updating profile picture:', err);
+      } finally {
+        setIsUploading(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleGenerateAiAvatar = async (e) => {
+    if (e) e.preventDefault();
+    if (!aiPrompt.trim()) return;
+
+    setIsGenerating(true);
+    try {
+      const seed = currentUser?.username || currentUser?._id || aiPrompt;
+      const generated = await generateCustomAiAvatar(aiPrompt, '3d avatar', seed);
+      setAiPreview(generated);
+      setSelectedPreset(null);
+    } catch (err) {
+      console.error('Error generating AI avatar in Profile:', err);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleApplyAiOrPresetAvatar = async () => {
+    const avatarToApply = aiPreview || selectedPreset;
+    if (!avatarToApply || !currentUser?._id) return;
+
+    setIsSavingAvatar(true);
+    try {
+      const res = await axios.post(`${AvtarRoute}/${currentUser._id}`, {
+        image: avatarToApply,
+      });
+
+      if (res.data?.isSet) {
+        const updatedUser = {
+          ...currentUser,
+          isAvtarImageSet: true,
+          avtarImage: res.data.image,
+        };
+        localStorage.setItem('chat-app-user', JSON.stringify(updatedUser));
+        if (onUpdateAvatar) {
+          onUpdateAvatar(res.data.image);
+        }
+        setShowAiModal(false);
+        setUploadSuccess(true);
+        setTimeout(() => setUploadSuccess(false), 3000);
+      }
+    } catch (err) {
+      console.error('Error applying AI avatar:', err);
+    } finally {
+      setIsSavingAvatar(false);
+    }
   };
 
   return (
-    <div className='Msg'>
-      <div className='last' title=' View your profile' onClick={handleClick}>
-      
-        <img src={profile} alt='profile' />
+    <div className='profile-btn-wrapper' ref={profileRef} style={{ position: 'relative' }}>
+      <input
+        type='file'
+        ref={fileInputRef}
+        accept='image/*'
+        style={{ display: 'none' }}
+        onChange={handleAvatarFileChange}
+      />
+
+      {/* Profile Avatar Button on Sidebar Footer */}
+      <div
+        className='profile-icon-circle'
+        title='View your profile'
+        onClick={handleClick}
+        style={{
+          width: '38px',
+          height: '38px',
+          borderRadius: '50%',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'hidden',
+          border: '1.5px solid rgba(255, 255, 255, 0.25)',
+          backgroundColor: '#111b21',
+          transition: 'transform 0.15s, border-color 0.2s',
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#00a884')}
+        onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.25)')}
+      >
+        {currentUserImage ? (
+          <img
+            src={getAvatarSrc(currentUserImage)}
+            alt='profile'
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          />
+        ) : (
+          <AccountCircleIcon style={{ width: '100%', height: '100%', color: '#8696a0' }} />
+        )}
       </div>
+
+      {/* Profile Popup Card */}
       {showProfile && (
-        <ProfileContainer>
-          <div className='profile-info'>
-            {/* <div className='h2'>Profile</div><hr></hr> */}
-            <img src={`data:image/svg+xml;base64,${currentUserImage}`} alt='profile' />
-            <h2>{currentUserName}</h2>
-            <h4>Email</h4>
-            <p>{email}</p>
+        <ProfilePopup>
+          <div className='profile-card-content'>
+            <div
+              style={{
+                position: 'relative',
+                width: '80px',
+                height: '80px',
+                borderRadius: '50%',
+                cursor: 'pointer',
+                marginBottom: '12px',
+              }}
+              onMouseEnter={() => setIsHoveringAvatar(true)}
+              onMouseLeave={() => setIsHoveringAvatar(false)}
+              onClick={() => fileInputRef.current?.click()}
+              title='Click to change profile picture'
+            >
+              {currentUserImage ? (
+                <img
+                  src={getAvatarSrc(currentUserImage)}
+                  alt='profile'
+                  style={{
+                    width: '80px',
+                    height: '80px',
+                    borderRadius: '50%',
+                    border: '2px solid #00a884',
+                    objectFit: 'cover',
+                  }}
+                />
+              ) : (
+                <AccountCircleIcon style={{ fontSize: '80px', color: '#00a884' }} />
+              )}
+
+              {/* Hover Camera Icon Overlay */}
+              {isHoveringAvatar && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '80px',
+                    height: '80px',
+                    borderRadius: '50%',
+                    backgroundColor: 'rgba(0,0,0,0.6)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#fff',
+                  }}
+                >
+                  <PhotoCameraIcon style={{ fontSize: '24px' }} />
+                  <span style={{ fontSize: '9px', marginTop: '2px' }}>Upload</span>
+                </div>
+              )}
+            </div>
+
+            {uploadSuccess && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  color: '#00a884',
+                  fontSize: '11.5px',
+                  marginBottom: '8px',
+                }}
+              >
+                <CheckCircleIcon style={{ fontSize: '14px' }} /> Profile photo updated!
+              </div>
+            )}
+
+            {isUploading && (
+              <div style={{ color: '#8696a0', fontSize: '11.5px', marginBottom: '8px' }}>
+                Updating photo...
+              </div>
+            )}
+
+            <h3 style={{ margin: '0 0 4px 0', color: '#e9edef', fontSize: '17px', fontWeight: '600' }}>
+              {currentUserName || 'User'}
+            </h3>
+            <p style={{ margin: '0 0 14px 0', color: '#8696a0', fontSize: '12px' }}>
+              {email || 'user@chatnex.com'}
+            </p>
+
+            {/* Quick Actions: Upload Photo & AI Avatar Generator */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%', marginBottom: '14px' }}>
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  color: '#e9edef',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  backgroundColor: '#182229',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  transition: 'background 0.2s',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#202c33')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#182229')}
+              >
+                <PhotoCameraIcon style={{ fontSize: '15px', color: '#8696a0' }} /> Upload Photo
+              </div>
+
+              <div
+                onClick={() => setShowAiModal(true)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  color: '#00a884',
+                  fontSize: '12px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  background: 'linear-gradient(135deg, rgba(0,168,132,0.15), rgba(0,210,211,0.15))',
+                  border: '1px solid rgba(0,168,132,0.3)',
+                  transition: 'background 0.2s',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#00a884')}
+                onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(0,168,132,0.3)')}
+              >
+                <AutoAwesomeIcon style={{ fontSize: '15px' }} /> Create AI Avatar
+              </div>
+            </div>
           </div>
           <Logout />
-        </ProfileContainer>
+        </ProfilePopup>
+      )}
+
+      {/* AI Avatar Creator Modal Dialog */}
+      {showAiModal && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            zIndex: 99999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            animation: 'fadeIn 0.2s ease-out',
+          }}
+          onClick={() => setShowAiModal(false)}
+        >
+          <div
+            style={{
+              backgroundColor: '#111b21',
+              borderRadius: '16px',
+              width: '460px',
+              maxWidth: '92vw',
+              padding: '24px',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              boxShadow: '0 16px 48px rgba(0, 0, 0, 0.8)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AutoAwesomeIcon style={{ color: '#00a884', fontSize: '22px' }} />
+                <h3 style={{ margin: 0, color: '#e9edef', fontSize: '18px', fontWeight: '600' }}>
+                  AI Avatar Creator
+                </h3>
+              </div>
+              <div
+                onClick={() => setShowAiModal(false)}
+                style={{ cursor: 'pointer', color: '#8696a0', display: 'flex' }}
+              >
+                <CloseIcon style={{ fontSize: '20px' }} />
+              </div>
+            </div>
+
+            {/* Prompt Form */}
+            <form onSubmit={handleGenerateAiAvatar} style={{ display: 'flex', gap: '8px' }}>
+              <input
+                type='text'
+                placeholder='e.g. "anime girl with purple hair", "cool boy with sunglasses"...'
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                style={{
+                  flex: 1,
+                  backgroundColor: '#202c33',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  borderRadius: '8px',
+                  padding: '9px 12px',
+                  color: '#e9edef',
+                  fontSize: '13px',
+                  outline: 'none',
+                }}
+              />
+              <button
+                type='submit'
+                disabled={isGenerating || !aiPrompt.trim()}
+                style={{
+                  background: 'linear-gradient(135deg, #00a884, #00d2d3)',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '0 16px',
+                  color: '#111b21',
+                  fontWeight: '600',
+                  fontSize: '13px',
+                  cursor: isGenerating || !aiPrompt.trim() ? 'not-allowed' : 'pointer',
+                  opacity: isGenerating || !aiPrompt.trim() ? 0.6 : 1,
+                }}
+              >
+                {isGenerating ? <CircularProgress size={16} style={{ color: '#111b21' }} /> : 'Generate'}
+              </button>
+            </form>
+
+            {/* Live Preview / Curated Presets */}
+            {aiPreview ? (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '14px',
+                  backgroundColor: '#182229',
+                  borderRadius: '10px',
+                  border: '1px solid rgba(0,168,132,0.3)',
+                }}
+              >
+                <img
+                  src={getAvatarSrc(aiPreview)}
+                  alt='AI Generated'
+                  style={{ width: '88px', height: '88px', borderRadius: '50%', border: '3px solid #00a884' }}
+                />
+                <span style={{ color: '#8696a0', fontSize: '12px', fontStyle: 'italic' }}>"{aiPrompt}"</span>
+                <button
+                  type='button'
+                  onClick={handleGenerateAiAvatar}
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    color: '#00a884',
+                    borderRadius: '6px',
+                    padding: '4px 12px',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <RefreshIcon style={{ fontSize: '14px' }} /> Regenerate Variation
+                </button>
+              </div>
+            ) : (
+              <div>
+                <span style={{ color: '#8696a0', fontSize: '12px', display: 'block', marginBottom: '8px' }}>
+                  Or pick a modern preset:
+                </span>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(4, 1fr)',
+                    gap: '10px',
+                    maxHeight: '180px',
+                    overflowY: 'auto',
+                    padding: '4px',
+                  }}
+                >
+                  {MODERN_AVATARS.slice(0, 8).map((av) => {
+                    const isSelected = selectedPreset === av.image;
+                    return (
+                      <div
+                        key={av.id}
+                        onClick={() => {
+                          setSelectedPreset(av.image);
+                          setAiPreview(null);
+                        }}
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          padding: '6px',
+                          borderRadius: '8px',
+                          backgroundColor: isSelected ? 'rgba(0,168,132,0.2)' : '#182229',
+                          border: isSelected ? '2px solid #00a884' : '1px solid transparent',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <img
+                          src={getAvatarSrc(av.image)}
+                          alt={av.name}
+                          style={{ width: '48px', height: '48px', borderRadius: '50%' }}
+                        />
+                        <span style={{ color: '#e9edef', fontSize: '11px', marginTop: '4px' }}>{av.name}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Footer Action Buttons */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '4px' }}>
+              <button
+                type='button'
+                onClick={() => setShowAiModal(false)}
+                style={{
+                  backgroundColor: 'transparent',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  color: '#8696a0',
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type='button'
+                onClick={handleApplyAiOrPresetAvatar}
+                disabled={isSavingAvatar || (!aiPreview && !selectedPreset)}
+                style={{
+                  backgroundColor: '#00a884',
+                  border: 'none',
+                  color: '#111b21',
+                  fontWeight: '600',
+                  padding: '8px 20px',
+                  borderRadius: '6px',
+                  cursor: isSavingAvatar || (!aiPreview && !selectedPreset) ? 'not-allowed' : 'pointer',
+                  fontSize: '13px',
+                  opacity: isSavingAvatar || (!aiPreview && !selectedPreset) ? 0.6 : 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                {isSavingAvatar ? <CircularProgress size={16} style={{ color: '#111b21' }} /> : null}
+                {isSavingAvatar ? 'Applying...' : 'Set as DP'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
 }
 
-const ProfileContainer = styled.div`
+const ProfilePopup = styled.div`
   position: fixed;
-  top: 36%;
-  left: 3.5%;
-  width: 20%;
-  height: 55%;
-  background-color: rgb(33,44,50);
-  z-index: 999;
-  border: 1.5px solid  white;
-  border-radius: 0.5rem 0.5rem 0.5rem 0rem;
- 
-  padding: 20px;
-  // z-index: 999;
+  bottom: 20px;
+  left: 65px;
+  width: 260px;
+  background-color: #202c33;
+  z-index: 9999;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  box-sizing: border-box;
 
-  .profile-info {
-   
-    h2 {
-      margin-top: 4px;
-      color:white;
-    }
-    h4 {
-      margin-top: 90px;
-      color:white;
-      margin-left: 20px;
-    }
-    img {
-      height: 80px;
-      border-radius: 50%;
-      margin-bottom: 10px;
-     
-    }
-    p {
-      margin-top: 40px;
-      color: #777;
-    }
+  .profile-card-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
   }
 `;

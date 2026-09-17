@@ -4,17 +4,39 @@ const messageSchema = new mongoose.Schema(
   {
     message: {
       text: {
-        type: String
+        type: String,
       },
       imgpath: {
-        type:String
+        type: String,
       },
+      files: [
+        {
+          url: { type: String },
+          filename: { type: String },
+          fileType: { type: String },
+          mimeType: { type: String },
+          size: { type: Number },
+        },
+      ],
     },
     users: [String], // Assuming users are stored as strings (user IDs)
     sender: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      ref: "users",
       required: true,
+    },
+    groupId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Group",
+      default: null,
+    },
+    isGroup: {
+      type: Boolean,
+      default: false,
+    },
+    isSystem: {
+      type: Boolean,
+      default: false,
     },
     read: {
       type: Boolean,
@@ -26,4 +48,4 @@ const messageSchema = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.model("messages", messageSchema);
+module.exports = mongoose.models.messages || mongoose.model("messages", messageSchema);
