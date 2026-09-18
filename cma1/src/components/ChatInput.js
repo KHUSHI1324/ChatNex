@@ -3,6 +3,13 @@ import Picker from 'emoji-picker-react';
 import { IoMdSend } from 'react-icons/io';
 import { BsEmojiSmileFill } from 'react-icons/bs';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
+import MicIcon from '@mui/icons-material/Mic';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import CheckIcon from '@mui/icons-material/Check';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import axios from 'axios';
+import { aiRewriteRoute } from '../utils/APIRoutes';
 
 const POPULAR_GIF_CATEGORIES = [
   "Trending", "Thank You", "Laugh", "Happy", "Love", "Yes", "No", "Dance", "Bye", "Wow", "Cat"
@@ -105,7 +112,16 @@ const GIF_DATABASE = {
   ],
 };
 
-export default function ChatInput({ handleSendMsg }) {
+export default function ChatInput({
+  handleSendMsg,
+  replyingTo,
+  onCancelReply,
+  editingMessage,
+  onSaveEdit,
+  onCancelEdit,
+  onTyping,
+  onStopTyping,
+}) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [activeTab, setActiveTab] = useState("emoji"); // "emoji" | "gif"
   const [msg, setMsg] = useState('');
@@ -116,9 +132,283 @@ export default function ChatInput({ handleSendMsg }) {
   const [gifLoading, setGifLoading] = useState(false);
   const [sendingGif, setSendingGif] = useState(false);
   const [popupAlert, setPopupAlert] = useState(null); // { title, message }
+  const [showToneMenu, setShowToneMenu] = useState(false);
+  const [rewritingTone, setRewritingTone] = useState(false);
+  const [previewDialog, setPreviewDialog] = useState(null); // { originalText, rewrittenText, tone, toneName, emoji }
+  const [copiedSuccess, setCopiedSuccess] = useState(false);
   const emojiPickerRef = useRef(null);
+  const toneMenuRef = useRef(null);
   const gifCache = useRef({ ...GIF_DATABASE });
   const activeRequestId = useRef(0);
+  const inputRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
+
+  const TONE_OPTIONS = [
+    { id: "professional", label: "Professional", emoji: "💼", desc: "Polished, clear & corporate" },
+    { id: "casual", label: "Casual", emoji: "😂", desc: "Fun, relaxed & friendly" },
+    { id: "concise", label: "Concise", emoji: "💡", desc: "Short, punchy & fluff-free" },
+    { id: "polite", label: "Polite", emoji: "🤝", desc: "Warm, respectful & courteous" },
+    { id: "energetic", label: "Energetic", emoji: "🚀", desc: "Enthusiastic & motivational" },
+  ];
+
+  const handleOpenToneMenu = () => {
+    if (!msg.trim()) {
+      setPopupAlert({
+        title: "Magic Tone Rewriter",
+        message: "Please type a message in the input box first to rewrite its tone!",
+      });
+      return;
+    }
+    setShowToneMenu((prev) => !prev);
+  };
+
+  const handleRewriteTone = async (toneObj) => {
+    if (!msg.trim()) return;
+    setShowToneMenu(false);
+    setRewritingTone(true);
+
+    // Immediately open dialog with loading = true
+    setPreviewDialog({
+      originalText: msg.trim(),
+      rewrittenText: "",
+      loading: true,
+      tone: toneObj.id,
+      toneName: toneObj.label,
+      emoji: toneObj.emoji,
+    });
+
+    try {
+      const response = await axios.post(aiRewriteRoute, {
+        text: msg.trim(),
+        tone: toneObj.id,
+      });
+
+      if (response.data && response.data.rewrittenText) {
+        setPreviewDialog((prev) => ({
+          ...(prev || {}),
+          originalText: msg.trim(),
+          rewrittenText: response.data.rewrittenText,
+          loading: false,
+          tone: toneObj.id,
+          toneName: toneObj.label,
+          emoji: toneObj.emoji,
+        }));
+      }
+    } catch (err) {
+      console.error("AI rewrite error:", err);
+      setPreviewDialog((prev) => ({
+        ...(prev || {}),
+        loading: false,
+        error: "Failed to rewrite tone. Please try again.",
+      }));
+    } finally {
+      setRewritingTone(false);
+    }
+  };
+
+  const handleApplyPreview = () => {
+    if (previewDialog?.rewrittenText) {
+      setMsg(previewDialog.rewrittenText);
+      setPreviewDialog(null);
+      inputRef.current?.focus();
+    }
+  };
+
+  const handleCopyPreview = () => {
+    if (previewDialog?.rewrittenText) {
+      navigator.clipboard.writeText(previewDialog.rewrittenText);
+      setCopiedSuccess(true);
+      setTimeout(() => setCopiedSuccess(false), 2000);
+    }
+  };
+
+  // Voice Recording State & Refs
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const recordingTimerRef = useRef(null);
+  const speechRecognitionRef = useRef(null);
+  const speechTranscriptRef = useRef('');
+
+  const startRecording = async () => {
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setPopupAlert({
+          title: "Voice Notes Unsupported",
+          message: "Your browser does not support microphone voice recording.",
+        });
+        return;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      speechTranscriptRef.current = '';
+
+      // Live Speech Recognition in browser (captures real spoken words)
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        try {
+          const recognition = new SpeechRecognition();
+          recognition.continuous = true;
+          recognition.interimResults = true;
+          recognition.lang = navigator.language || 'en-US';
+          recognition.onresult = (event) => {
+            let fullText = '';
+            for (let i = 0; i < event.results.length; ++i) {
+              fullText += event.results[i][0].transcript + ' ';
+            }
+            speechTranscriptRef.current = fullText.trim();
+          };
+          recognition.onerror = (e) => {
+            console.warn("Speech recognition warning:", e.error);
+          };
+          recognition.start();
+          speechRecognitionRef.current = recognition;
+        } catch (speechErr) {
+          console.warn("Speech recognition init:", speechErr);
+        }
+      }
+
+      let mimeType = 'audio/webm;codecs=opus';
+      if (!window.MediaRecorder || !MediaRecorder.isTypeSupported(mimeType)) {
+        if (window.MediaRecorder && MediaRecorder.isTypeSupported('audio/webm')) mimeType = 'audio/webm';
+        else if (window.MediaRecorder && MediaRecorder.isTypeSupported('audio/ogg')) mimeType = 'audio/ogg';
+        else if (window.MediaRecorder && MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4';
+        else mimeType = '';
+      }
+
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.start(100);
+      setIsRecording(true);
+      setRecordingDuration(0);
+
+      if (onTyping) onTyping();
+
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingDuration((prev) => prev + 1);
+      }, 1000);
+    } catch (err) {
+      console.error("Microphone access error:", err);
+      setPopupAlert({
+        title: "Microphone Access Required",
+        message: "Please allow microphone access in your browser to record and send voice notes.",
+      });
+    }
+  };
+
+  const stopAndSendRecording = () => {
+    if (!mediaRecorderRef.current || !isRecording) return;
+    const recorder = mediaRecorderRef.current;
+    clearInterval(recordingTimerRef.current);
+    if (onStopTyping) onStopTyping();
+
+    if (speechRecognitionRef.current) {
+      try {
+        speechRecognitionRef.current.stop();
+      } catch (e) {}
+    }
+
+    const capturedTranscript = speechTranscriptRef.current || '';
+
+    recorder.onstop = () => {
+      const audioBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+      const audioExt = (recorder.mimeType || "").includes("ogg") ? "ogg" : (recorder.mimeType || "").includes("mp4") ? "m4a" : "webm";
+      const audioFile = new File([audioBlob], `voice-note-${Date.now()}.${audioExt}`, {
+        type: recorder.mimeType || 'audio/webm',
+      });
+
+      // Attach recognized speech transcript to file object
+      audioFile.voiceTranscript = capturedTranscript;
+
+      if (recorder.stream) {
+        recorder.stream.getTracks().forEach((track) => track.stop());
+      }
+
+      setIsRecording(false);
+      setRecordingDuration(0);
+      audioChunksRef.current = [];
+      speechTranscriptRef.current = '';
+
+      handleSendMsg("", [audioFile], replyingTo);
+      if (replyingTo && onCancelReply) {
+        onCancelReply();
+      }
+    };
+
+    recorder.stop();
+  };
+
+  const cancelRecording = () => {
+    if (!mediaRecorderRef.current) return;
+    clearInterval(recordingTimerRef.current);
+    if (onStopTyping) onStopTyping();
+
+    if (speechRecognitionRef.current) {
+      try {
+        speechRecognitionRef.current.stop();
+      } catch (e) {}
+    }
+
+    const recorder = mediaRecorderRef.current;
+    if (recorder.state !== 'inactive') {
+      recorder.stop();
+    }
+    if (recorder.stream) {
+      recorder.stream.getTracks().forEach((track) => track.stop());
+    }
+
+    setIsRecording(false);
+    setRecordingDuration(0);
+    audioChunksRef.current = [];
+    speechTranscriptRef.current = '';
+  };
+
+  const formatRecordingTime = (secs) => {
+    const mins = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${mins}:${s < 10 ? '0' : ''}${s}`;
+  };
+
+  const handleInputChange = (e) => {
+    const value = e.target.value;
+    setMsg(value);
+
+    if (onTyping) {
+      onTyping();
+    }
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    typingTimeoutRef.current = setTimeout(() => {
+      if (onStopTyping) {
+        onStopTyping();
+      }
+    }, 2000);
+  };
+
+  useEffect(() => {
+    if (editingMessage) {
+      setMsg(editingMessage.message || "");
+      inputRef.current?.focus();
+    }
+  }, [editingMessage]);
+
+  useEffect(() => {
+    if (replyingTo) {
+      inputRef.current?.focus();
+    }
+  }, [replyingTo]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -136,6 +426,21 @@ export default function ChatInput({ handleSendMsg }) {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [showEmojiPicker]);
+
+  useEffect(() => {
+    const handleToneClickOutside = (event) => {
+      if (toneMenuRef.current && !toneMenuRef.current.contains(event.target)) {
+        setShowToneMenu(false);
+      }
+    };
+
+    if (showToneMenu) {
+      document.addEventListener('mousedown', handleToneClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleToneClickOutside);
+    };
+  }, [showToneMenu]);
 
   // Fetch GIFs with instant cache (0ms latency) and race-condition prevention
   const fetchGifs = async (searchTerm = "") => {
@@ -298,12 +603,31 @@ export default function ChatInput({ handleSendMsg }) {
 
   const sendChat = async (e) => {
     e.preventDefault();
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    if (onStopTyping) {
+      onStopTyping();
+    }
+
+    if (editingMessage) {
+      if (msg.trim().length > 0) {
+        if (onSaveEdit) onSaveEdit(editingMessage._id, msg.trim());
+        setMsg('');
+      }
+      return;
+    }
+
     if (msg.trim().length > 0 || selectedFiles.length > 0) {
-      handleSendMsg(msg.trim(), selectedFiles);
+      handleSendMsg(msg.trim(), selectedFiles, replyingTo);
       setMsg('');
       setSelectedFiles([]);
+      if (replyingTo && onCancelReply) {
+        onCancelReply();
+      }
     }
   };
+
 
   const getFileIcon = (file) => {
     const ext = (file.name.split('.').pop() || '').toLowerCase();
@@ -336,6 +660,95 @@ export default function ChatInput({ handleSendMsg }) {
 
   return (
     <div className='chat-input-wrapper'>
+      {/* Quoted Reply Banner */}
+      {replyingTo && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            backgroundColor: '#182229',
+            borderLeft: '4px solid #00a884',
+            padding: '8px 16px',
+            borderBottom: '1px solid rgba(255,255,255,0.06)',
+            animation: 'fadeIn 0.2s ease-out',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', overflow: 'hidden' }}>
+            <span style={{ color: '#00a884', fontSize: '12px', fontWeight: '600' }}>
+              Replying to {replyingTo.senderName || 'Message'}
+            </span>
+            <span
+              style={{
+                color: '#8696a0',
+                fontSize: '12px',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                maxWidth: '450px',
+              }}
+            >
+              {replyingTo.text || (replyingTo.fileType ? `📎 ${replyingTo.fileType.toUpperCase()}` : 'Attachment')}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onCancelReply}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#8696a0',
+              cursor: 'pointer',
+              fontSize: '16px',
+              padding: '4px',
+            }}
+            title="Cancel reply"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Editing Message Banner */}
+      {editingMessage && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            backgroundColor: '#182229',
+            borderLeft: '4px solid #f59e0b',
+            padding: '8px 16px',
+            borderBottom: '1px solid rgba(255,255,255,0.06)',
+            animation: 'fadeIn 0.2s ease-out',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            <span style={{ color: '#f59e0b', fontSize: '12px', fontWeight: '600' }}>
+              ✏️ Edit Message
+            </span>
+            <span style={{ color: '#8696a0', fontSize: '11.5px' }}>
+              Make changes and click checkmark or press Enter to save
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onCancelEdit}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#8696a0',
+              cursor: 'pointer',
+              fontSize: '16px',
+              padding: '4px',
+            }}
+            title="Cancel editing"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* File Preview Chips Tray */}
       {selectedFiles.length > 0 && (
         <div
@@ -686,20 +1099,435 @@ export default function ChatInput({ handleSendMsg }) {
             >
               <AttachFileIcon style={{ fontSize: '24px' }} />
             </label>
+
+            {/* AI Magic Tone Rewriter Button & Popover */}
+            <div style={{ position: 'relative' }} ref={toneMenuRef}>
+              <button
+                type="button"
+                onClick={handleOpenToneMenu}
+                title="✨ AI Tone Rewriter (Magic Wand)"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: rewritingTone ? '#00a884' : '#8696a0',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '2px',
+                  transition: 'color 0.2s, transform 0.15s',
+                  animation: rewritingTone ? 'spin 1.5s linear infinite' : 'none',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = '#00a884';
+                  e.currentTarget.style.transform = 'scale(1.15)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = rewritingTone ? '#00a884' : '#8696a0';
+                  e.currentTarget.style.transform = 'scale(1)';
+                }}
+              >
+                <AutoFixHighIcon style={{ fontSize: '23px' }} />
+              </button>
+
+              {/* Tone Popover Menu */}
+              {showToneMenu && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    bottom: '45px',
+                    left: '0px',
+                    zIndex: 1000,
+                    backgroundColor: '#202c33',
+                    borderRadius: '10px',
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    width: '230px',
+                    overflow: 'hidden',
+                    animation: 'fadeIn 0.15s ease-out',
+                  }}
+                >
+                  <div
+                    style={{
+                      padding: '8px 12px',
+                      backgroundColor: '#111b21',
+                      borderBottom: '1px solid rgba(255,255,255,0.08)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    <span style={{ fontSize: '14px' }}>🪄</span>
+                    <span style={{ fontSize: '12px', fontWeight: '600', color: '#e9edef' }}>
+                      AI Tone Rewriter
+                    </span>
+                  </div>
+
+                  <div style={{ padding: '6px 0' }}>
+                    {TONE_OPTIONS.map((opt) => (
+                      <div
+                        key={opt.id}
+                        onClick={() => handleRewriteTone(opt)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          padding: '8px 14px',
+                          cursor: 'pointer',
+                          transition: 'background 0.15s',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#182229')}
+                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                      >
+                        <span style={{ fontSize: '17px' }}>{opt.emoji}</span>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontSize: '13px', color: '#e9edef', fontWeight: '500' }}>
+                            {opt.label}
+                          </span>
+                          <span style={{ fontSize: '10.5px', color: '#8696a0' }}>
+                            {opt.desc}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
-        <form className='input-container' onSubmit={sendChat}>
-          <input
-            type='text'
-            placeholder={selectedFiles.length > 0 ? `Add a caption for ${selectedFiles.length} file(s)...` : 'Type your message'}
-            value={msg}
-            onChange={(e) => setMsg(e.target.value)}
-          />
-          <button className='submit'>
-            <IoMdSend />
-          </button>
-        </form>
+        {isRecording ? (
+          <div className="voice-recording-bar">
+            <div className="recording-blink-dot" />
+            <span style={{ color: '#ea868f', fontSize: '13.5px', fontWeight: 'bold', minWidth: '42px', letterSpacing: '0.5px' }}>
+              {formatRecordingTime(recordingDuration)}
+            </span>
+
+            {/* Visualizer Soundwave Bars */}
+            <div className="soundwave-visualizer">
+              {[0.2, 0.5, 0.8, 0.3, 0.9, 0.4, 0.7, 0.2, 0.6, 1.0, 0.5, 0.3, 0.8, 0.4, 0.7, 0.9, 0.3, 0.6].map((delay, idx) => (
+                <div
+                  key={idx}
+                  className="soundwave-bar"
+                  style={{
+                    animationDelay: `${delay}s`,
+                    height: `${8 + Math.sin(idx) * 6}px`,
+                  }}
+                />
+              ))}
+            </div>
+
+            {/* Cancel Button */}
+            <button
+              type="button"
+              onClick={cancelRecording}
+              title="Discard recording"
+              style={{
+                backgroundColor: 'transparent',
+                border: 'none',
+                color: '#ea868f',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '6px',
+                borderRadius: '50%',
+                transition: 'transform 0.15s',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.15)')}
+              onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+            >
+              <DeleteOutlineIcon style={{ fontSize: '22px' }} />
+            </button>
+
+            {/* Send Voice Note Button */}
+            <button
+              type="button"
+              onClick={stopAndSendRecording}
+              title="Send voice note"
+              style={{
+                backgroundColor: '#00a884',
+                border: 'none',
+                color: '#111b21',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '32px',
+                height: '32px',
+                borderRadius: '50%',
+                fontWeight: 'bold',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
+                transition: 'transform 0.15s, background-color 0.2s',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.1)')}
+              onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+            >
+              <CheckIcon style={{ fontSize: '20px', fontWeight: 'bold' }} />
+            </button>
+          </div>
+        ) : (
+          <form className='input-container' onSubmit={sendChat}>
+            <input
+              ref={inputRef}
+              type='text'
+              placeholder={selectedFiles.length > 0 ? `Add a caption for ${selectedFiles.length} file(s)...` : (editingMessage ? "Edit your message..." : "Type your message")}
+              value={msg}
+              onChange={handleInputChange}
+            />
+            {msg.trim().length > 0 || selectedFiles.length > 0 || editingMessage ? (
+              <button className='submit' title={editingMessage ? "Save edit" : "Send"}>
+                <IoMdSend />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className='submit'
+                onClick={startRecording}
+                title="Record Voice Note"
+                style={{
+                  color: '#8696a0',
+                  transition: 'color 0.2s, transform 0.15s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = '#00a884';
+                  e.currentTarget.style.transform = 'scale(1.15)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = '#8696a0';
+                  e.currentTarget.style.transform = 'scale(1)';
+                }}
+              >
+                <MicIcon style={{ fontSize: '23px' }} />
+              </button>
+            )}
+          </form>
+        )}
       </div>
+
+      {/* In-App AI Tone Rewriter Preview Dialog */}
+      {previewDialog && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.78)',
+            zIndex: 99999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            animation: 'fadeIn 0.2s ease-out',
+          }}
+          onClick={() => setPreviewDialog(null)}
+        >
+          <div
+            style={{
+              backgroundColor: '#202c33',
+              borderRadius: '12px',
+              width: '460px',
+              maxWidth: '92vw',
+              padding: '22px',
+              border: '1px solid rgba(255, 255, 255, 0.14)',
+              boxShadow: '0 16px 40px rgba(0, 0, 0, 0.75)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '20px' }}>🪄</span>
+                <div>
+                  <h3 style={{ margin: 0, color: '#e9edef', fontSize: '16px', fontWeight: '600' }}>
+                    AI Tone Rewriter Preview
+                  </h3>
+                  <span style={{ fontSize: '12px', color: '#00a884', fontWeight: '500' }}>
+                    Tone: {previewDialog.emoji} {previewDialog.toneName}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewDialog(null)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#8696a0',
+                  fontSize: '18px',
+                  cursor: 'pointer',
+                  padding: '4px',
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Original Draft Box */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <span style={{ fontSize: '11.5px', color: '#8696a0', fontWeight: '600', letterSpacing: '0.3px' }}>
+                ORIGINAL DRAFT
+              </span>
+              <div
+                style={{
+                  backgroundColor: '#111b21',
+                  borderRadius: '8px',
+                  padding: '10px 12px',
+                  fontSize: '13px',
+                  color: '#8696a0',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                  maxHeight: '80px',
+                  overflowY: 'auto',
+                }}
+              >
+                {previewDialog.originalText}
+              </div>
+            </div>
+
+            {/* Rewritten Draft Box / Loading State */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <span style={{ fontSize: '11.5px', color: '#00a884', fontWeight: '600', letterSpacing: '0.3px' }}>
+                ✨ REWRITTEN DRAFT ({previewDialog.toneName?.toUpperCase() || "AI REWRITE"})
+              </span>
+              {previewDialog.loading ? (
+                <div
+                  style={{
+                    backgroundColor: '#182229',
+                    borderRadius: '8px',
+                    padding: '24px 16px',
+                    fontSize: '13.5px',
+                    color: '#00a884',
+                    border: '1.5px dashed #00a884',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '12px',
+                    minHeight: '100px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '18px', animation: 'spin 1.5s linear infinite' }}>🪄</span>
+                    <span style={{ fontWeight: '600' }}>
+                      Rewriting into {previewDialog.emoji} {previewDialog.toneName} tone...
+                    </span>
+                  </div>
+                  <div className="typing-indicator" style={{ background: 'transparent', padding: 0 }}>
+                    <span className="typing-dot" style={{ backgroundColor: '#00a884', width: '6px', height: '6px' }}></span>
+                    <span className="typing-dot" style={{ backgroundColor: '#00a884', width: '6px', height: '6px' }}></span>
+                    <span className="typing-dot" style={{ backgroundColor: '#00a884', width: '6px', height: '6px' }}></span>
+                  </div>
+                </div>
+              ) : previewDialog.error ? (
+                <div
+                  style={{
+                    backgroundColor: 'rgba(234, 134, 143, 0.15)',
+                    borderRadius: '8px',
+                    padding: '12px 14px',
+                    fontSize: '13px',
+                    color: '#ea868f',
+                    border: '1px solid #ea868f',
+                  }}
+                >
+                  ⚠️ {previewDialog.error}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    backgroundColor: '#182229',
+                    borderRadius: '8px',
+                    padding: '12px 14px',
+                    fontSize: '14px',
+                    color: '#e9edef',
+                    border: '1.5px solid #00a884',
+                    boxShadow: '0 0 12px rgba(0, 168, 132, 0.15)',
+                    maxHeight: '140px',
+                    overflowY: 'auto',
+                    lineHeight: '1.45',
+                  }}
+                >
+                  {previewDialog.rewrittenText}
+                </div>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px' }}>
+              <button
+                type="button"
+                onClick={handleCopyPreview}
+                disabled={previewDialog.loading || !previewDialog.rewrittenText}
+                style={{
+                  backgroundColor: '#2a3942',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  color: copiedSuccess ? '#00a884' : '#e9edef',
+                  padding: '8px 14px',
+                  borderRadius: '6px',
+                  cursor: (previewDialog.loading || !previewDialog.rewrittenText) ? 'not-allowed' : 'pointer',
+                  fontSize: '12.5px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontWeight: '500',
+                  opacity: (previewDialog.loading || !previewDialog.rewrittenText) ? 0.5 : 1,
+                  transition: 'background 0.2s, color 0.2s',
+                }}
+              >
+                <ContentCopyIcon style={{ fontSize: '15px' }} />
+                <span>{copiedSuccess ? "Copied!" : "Copy"}</span>
+              </button>
+
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => setPreviewDialog(null)}
+                  style={{
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    color: '#8696a0',
+                    padding: '8px 14px',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApplyPreview}
+                  disabled={previewDialog.loading || !previewDialog.rewrittenText}
+                  style={{
+                    backgroundColor: '#00a884',
+                    border: 'none',
+                    color: '#111b21',
+                    fontWeight: '600',
+                    padding: '8px 18px',
+                    borderRadius: '6px',
+                    cursor: (previewDialog.loading || !previewDialog.rewrittenText) ? 'not-allowed' : 'pointer',
+                    fontSize: '13px',
+                    boxShadow: '0 2px 8px rgba(0, 168, 132, 0.3)',
+                    opacity: (previewDialog.loading || !previewDialog.rewrittenText) ? 0.5 : 1,
+                    transition: 'transform 0.15s',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!previewDialog.loading && previewDialog.rewrittenText) {
+                      e.currentTarget.style.transform = 'scale(1.03)';
+                    }
+                  }}
+                  onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+                >
+                  Apply to Message
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* In-App Popup Modal (No browser alerts) */}
       {popupAlert && (

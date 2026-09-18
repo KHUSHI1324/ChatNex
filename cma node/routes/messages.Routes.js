@@ -2,7 +2,19 @@
 const express = require("express");
 const router = express.Router();
 const multer = require('multer'); 
-const { addMessage, getAllMessage, uploadMedia, markAsRead } = require("../controllers/messagesController");
+const {
+  addMessage,
+  getAllMessage,
+  uploadMedia,
+  markAsRead,
+  reactToMessage,
+  editMessage,
+  deleteMessage,
+  pinMessage,
+  starMessage,
+  getAISessions,
+  deleteAISession,
+} = require("../controllers/messagesController");
 
 // Allowed mime types & extensions
 const ALLOWED_MIME_TYPES = new Set([
@@ -12,6 +24,16 @@ const ALLOWED_MIME_TYPES = new Set([
   "image/webp",
   "image/svg+xml",
   "image/bmp",
+  "audio/webm",
+  "audio/mp3",
+  "audio/mpeg",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/ogg",
+  "audio/m4a",
+  "audio/x-m4a",
+  "audio/aac",
+  "audio/mp4",
   "video/mp4",
   "video/webm",
   "video/quicktime",
@@ -33,7 +55,8 @@ const ALLOWED_MIME_TYPES = new Set([
 
 const ALLOWED_EXTENSIONS = new Set([
   "jpg", "jpeg", "png", "gif", "webp", "svg", "bmp",
-  "mp4", "webm", "mov", "mkv", "avi", "ogg",
+  "mp3", "wav", "ogg", "m4a", "aac", "opus", "weba",
+  "mp4", "webm", "mov", "mkv", "avi",
   "pdf", "doc", "docx", "xls", "xlsx", "csv"
 ]);
 
@@ -97,4 +120,11 @@ router.post("/addmsg", addMessage);
 router.post("/getmsg", getAllMessage);
 router.put("/mark-read", markAsRead);
 router.post("/mark-read", markAsRead);
+router.post("/react", reactToMessage);
+router.put("/edit", editMessage);
+router.post("/delete", deleteMessage);
+router.put("/pin", pinMessage);
+router.put("/star", starMessage);
+router.post("/getaisessions", getAISessions);
+router.post("/deleteaisession", deleteAISession);
 module.exports = router;

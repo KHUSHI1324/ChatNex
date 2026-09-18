@@ -5,17 +5,23 @@ import axios from 'axios';
 import Contacts from '../components/Contacts';
 import CallsPanel from '../components/CallsPanel';
 import GroupsPanel from '../components/GroupsPanel';
+import StatusPanel from '../components/StatusPanel';
+import SettingsDrawer from '../components/SettingsDrawer';
+import PasscodeLockModal from '../components/PasscodeLockModal';
+import IncomingCallModal from '../components/IncomingCallModal';
 import CallModal from '../components/CallModal';
 import CallInfoView from '../components/CallInfoView';
 import ChatContainer from '../components/ChatContainer';
 import {
   contactsWithLastMessageRoute,
   getUserGroupsRoute,
+  createGroupRoute,
   addMembersGroupRoute,
   removeMemberGroupRoute,
   makeAdminGroupRoute,
   dismissAdminGroupRoute,
   updateGroupAvatarRoute,
+  updateGroupDetailsRoute,
   leaveGroupRoute,
   deleteGroupRoute,
   markReadRoute,
@@ -29,7 +35,9 @@ import FitbitIcon from '@mui/icons-material/Fitbit';
 import MessageIcon from '@mui/icons-material/Message';
 import CallIcon from '@mui/icons-material/Call';
 import GroupsIcon from '@mui/icons-material/Groups';
-import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
+import DonutLargeIcon from '@mui/icons-material/DonutLarge';
+import SettingsIcon from '@mui/icons-material/Settings';
+import LockIcon from '@mui/icons-material/Lock';
 
 function ChatPage() {
   const socket = useRef();
@@ -41,11 +49,24 @@ function ChatPage() {
   const [arrivalMessage, setArrivalMessage] = useState(null);
   const [unreadMessages, setUnreadMessages] = useState({});
   const [isLoaded, setIsLoaded] = useState(false);
-  const [activeTab, setActiveTab] = useState('chats'); // 'chats' | 'calls' | 'groups'
+  const [activeTab, setActiveTab] = useState('chats'); // 'chats' | 'status' | 'calls' | 'groups'
   const [activeCall, setActiveCall] = useState(null); // { contact, type: 'audio' | 'video' }
+  const [incomingCall, setIncomingCall] = useState(null);
   const [selectedCallContact, setSelectedCallContact] = useState(null);
   const [callLogs, setCallLogs] = useState([]);
-  const [toastNotification, setToastNotification] = useState(null); // { title, message }
+  const [toastNotification, setToastNotification] = useState(null); // { type, title, message }
+  const [onlineUsers, setOnlineUsers] = useState(new Set());
+  const [loadingContacts, setLoadingContacts] = useState(true);
+  const [contactsError, setContactsError] = useState(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isAppLocked, setIsAppLocked] = useState(false);
+
+  const showToast = (type = 'info', title = 'Notice', message = '') => {
+    setToastNotification({ type, title, message });
+    setTimeout(() => {
+      setToastNotification((prev) => (prev?.title === title ? null : prev));
+    }, 4500);
+  };
 
   // Load call logs from localStorage or initialize with sample logs
   useEffect(() => {
@@ -117,6 +138,9 @@ function ChatPage() {
     currentChatRef.current = currentChat;
   }, [currentChat]);
 
+  const hasSyncedProfile = useRef(false);
+  const hasLoadedContacts = useRef(false);
+
   useEffect(() => {
     async function fetchData() {
       const raw = localStorage.getItem('chat-app-user');
@@ -129,14 +153,25 @@ function ChatPage() {
       setCurrentUser(localUser);
       setIsLoaded(true);
 
-      // Fetch latest profile from DB to keep avatar & details fully in sync
+      if (localUser.isPasscodeEnabled && sessionStorage.getItem('chatnex_session_unlocked') !== 'true') {
+        setIsAppLocked(true);
+      }
+
+      if (hasSyncedProfile.current) return;
+      hasSyncedProfile.current = true;
+
+      // Fetch latest profile from DB only if avatar, details, privacy or passcode changed
       try {
         if (localUser?._id) {
           const res = await axios.get(`${getUserRoute}/${localUser._id}`);
           if (res.data?.status && res.data.user) {
-            const freshUser = { ...localUser, ...res.data.user };
+            const fetched = res.data.user;
+            const freshUser = { ...localUser, ...fetched };
             setCurrentUser(freshUser);
             localStorage.setItem('chat-app-user', JSON.stringify(freshUser));
+            if (fetched.isPasscodeEnabled && sessionStorage.getItem('chatnex_session_unlocked') !== 'true') {
+              setIsAppLocked(true);
+            }
           }
         }
       } catch (err) {
@@ -161,7 +196,9 @@ function ChatPage() {
       if (count > 1) {
         prefix = allImages ? `📷 ${count} photos` : `📎 ${count} files`;
       } else {
-        if (single.fileType === "video" || (single.mimeType && single.mimeType.startsWith("video/")) || /\.(mp4|webm|mov|mkv|avi|ogg|m4v)$/i.test(single.url || single.filename || "")) {
+        if (single.fileType === "audio" || (single.mimeType && single.mimeType.startsWith("audio/")) || /\.(mp3|wav|ogg|m4a|aac|opus|weba)$/i.test(single.url || single.filename || "")) {
+          prefix = "🎙️ Voice message";
+        } else if (single.fileType === "video" || (single.mimeType && single.mimeType.startsWith("video/")) || /\.(mp4|webm|mov|mkv|avi|ogg|m4v)$/i.test(single.url || single.filename || "")) {
           prefix = "🎥 Video";
         } else if (single.fileType === "gif" || singleExt === "gif") {
           prefix = "👾 GIF";
@@ -540,6 +577,90 @@ function ChatPage() {
     }
   };
 
+  const handleUpdateGroupDetails = async (groupIdOrObj, details = {}) => {
+    try {
+      const isObj = typeof groupIdOrObj === 'object' && groupIdOrObj !== null;
+      const groupId = isObj ? groupIdOrObj.groupId : groupIdOrObj;
+      const name = isObj ? groupIdOrObj.name : details.name;
+      const description = isObj ? groupIdOrObj.description : details.description;
+      const permissions = isObj ? groupIdOrObj.permissions : details.permissions;
+
+      if (!groupId) {
+        showToast("error", "Error", "Group ID is missing.");
+        return;
+      }
+
+      const res = await axios.put(updateGroupDetailsRoute, {
+        groupId,
+        userId: currentUser?._id,
+        name,
+        description,
+        permissions,
+      });
+      if (res.data?.status && res.data.group) {
+        const updatedGroup = res.data.group;
+        setGroups((prev) =>
+          prev.map((g) => (g._id === groupId ? { ...g, ...updatedGroup } : g))
+        );
+        setContacts((prev) =>
+          prev.map((c) => (c._id === groupId ? { ...c, ...updatedGroup } : c))
+        );
+        if (currentChat && currentChat._id === groupId) {
+          setCurrentChat((prev) => ({ ...prev, ...updatedGroup }));
+        }
+        if (socket?.current && updatedGroup.members) {
+          socket.current.emit("group-action", {
+            action: "updated",
+            groupId,
+            group: updatedGroup,
+            targetMemberIds: updatedGroup.members.map((m) => (m._id || m).toString()),
+          });
+        }
+        showToast("success", "Group Updated", "Group details updated successfully.");
+      }
+    } catch (err) {
+      console.error("Error updating group details:", err);
+      showToast("error", "Update Failed", err.response?.data?.msg || "Could not update group details.");
+    }
+  };
+
+  const handleCreateSimilarGroup = async (nameOrObj, memberIdsList = []) => {
+    try {
+      const isObj = typeof nameOrObj === 'object' && nameOrObj !== null;
+      const name = isObj ? nameOrObj.name : nameOrObj;
+      const members = isObj ? (nameOrObj.members || []) : memberIdsList;
+
+      if (!name) {
+        showToast("error", "Error", "Group name is required.");
+        return;
+      }
+
+      const res = await axios.post(createGroupRoute, {
+        name,
+        members,
+        admin: currentUser?._id,
+      });
+      if (res.data?.status && res.data.group) {
+        const newGroup = res.data.group;
+        setGroups((prev) => [newGroup, ...prev]);
+        setContacts((prev) => [newGroup, ...prev]);
+        setCurrentChat(newGroup);
+        // Emit create-group so all members get real-time notification
+        if (socket?.current) {
+          socket.current.emit("create-group", {
+            group: newGroup,
+            creator: currentUser,
+          });
+        }
+        showToast("success", "Group Created", `"${name}" group was created successfully.`);
+      }
+    } catch (err) {
+      console.error("Error creating similar group:", err);
+      showToast("error", "Creation Failed", err.response?.data?.msg || "Could not create similar group.");
+    }
+  };
+
+
   const handleLeaveGroup = async (groupId) => {
     try {
       const res = await axios.post(leaveGroupRoute, {
@@ -634,17 +755,46 @@ function ChatPage() {
   };
 
   useEffect(() => {
-    if (currentUser) {
-      socket.current = io(host);
+    if (currentUser?._id) {
+      socket.current = io(host, {
+        transports: ["websocket", "polling"],
+      });
 
       socket.current.on("connect", () => {
         console.log(`[FRONTEND] Socket connected (${socket.current.id}). Emitting add-user for:`, currentUser._id);
         socket.current.emit('add-user', currentUser._id);
       });
 
-      if (socket.current.connected) {
-        socket.current.emit('add-user', currentUser._id);
-      }
+      socket.current.on("online-users-list", (list) => {
+        console.log("[FRONTEND] online-users-list received:", list);
+        if (Array.isArray(list)) {
+          setOnlineUsers(new Set(list.map((id) => id.toString())));
+        }
+      });
+
+      socket.current.on("user-status", (arg1, arg2) => {
+        console.log("[FRONTEND] user-status received:", arg1, arg2);
+        let uid, stat;
+        if (typeof arg1 === 'object' && arg1 !== null) {
+          uid = arg1.userId?.toString();
+          stat = Boolean(arg1.status);
+        } else {
+          uid = arg1?.toString();
+          stat = Boolean(arg2);
+        }
+        if (!uid) return;
+
+        setOnlineUsers((prev) => {
+          const nextSet = new Set(prev);
+          if (stat) {
+            nextSet.add(uid);
+          } else {
+            nextSet.delete(uid);
+          }
+          return nextSet;
+        });
+      });
+
 
       // Group Creation Real-time listener
       socket.current.on("group-created", (data) => {
@@ -661,19 +811,40 @@ function ChatPage() {
         }
       });
 
+      // New user registered — add them to everyone's contacts in real-time
+      socket.current.on("new-user-registered", (data) => {
+        console.log("[FRONTEND] new-user-registered event received:", data);
+        const { user } = data || {};
+        if (user && user._id && user._id.toString() !== currentUser?._id?.toString()) {
+          setContacts((prev) => {
+            // Only add if not already present
+            if (prev.some((c) => c._id?.toString() === user._id?.toString())) return prev;
+            return [...prev, user];
+          });
+        }
+      });
+
       // Group Action (update/leave/delete) Real-time listener
       socket.current.on("group-action", (data) => {
         console.log("[FRONTEND] group-action event received:", data);
         const { action, groupId, group } = data || {};
         if (action === "updated" && group) {
+          const isCurrentUserStillMember =
+            (group.members || []).some(
+              (m) => (m._id || m).toString() === currentUser?._id?.toString()
+            ) ||
+            (group.admin?._id || group.admin || "").toString() === currentUser?._id?.toString() ||
+            (Array.isArray(group.admins) &&
+              group.admins.some((a) => (a?._id || a || "").toString() === currentUser?._id?.toString()));
+
           setGroups((prev) =>
-            prev.map((g) => (g._id === groupId ? { ...g, ...group } : g))
+            prev.map((g) => (g._id === groupId ? { ...g, ...group, isCurrentMember: isCurrentUserStillMember } : g))
           );
           setContacts((prev) =>
-            prev.map((c) => (c._id === groupId ? { ...c, ...group } : c))
+            prev.map((c) => (c._id === groupId ? { ...c, ...group, isCurrentMember: isCurrentUserStillMember } : c))
           );
           if (currentChatRef.current && currentChatRef.current._id === groupId) {
-            setCurrentChat((prev) => ({ ...prev, ...group }));
+            setCurrentChat((prev) => ({ ...prev, ...group, isCurrentMember: isCurrentUserStillMember }));
           }
         } else if (action === "deleted") {
           setGroups((prev) => prev.filter((g) => g._id !== groupId));
@@ -687,18 +858,44 @@ function ChatPage() {
           });
           setTimeout(() => setToastNotification(null), 4500);
         } else if (action === "left" && group) {
+          const isCurrentUserStillMember =
+            (group.members || []).some(
+              (m) => (m._id || m).toString() === currentUser?._id?.toString()
+            ) ||
+            (group.admin?._id || group.admin || "").toString() === currentUser?._id?.toString() ||
+            (Array.isArray(group.admins) &&
+              group.admins.some((a) => (a?._id || a || "").toString() === currentUser?._id?.toString()));
+
           setGroups((prev) =>
-            prev.map((g) => (g._id === groupId ? { ...g, members: group.members } : g))
+            prev.map((g) => (g._id === groupId ? { ...g, ...group, isCurrentMember: isCurrentUserStillMember } : g))
           );
           setContacts((prev) =>
-            prev.map((c) => (c._id === groupId ? { ...c, members: group.members } : c))
+            prev.map((c) => (c._id === groupId ? { ...c, ...group, isCurrentMember: isCurrentUserStillMember } : c))
           );
           if (currentChatRef.current && currentChatRef.current._id === groupId) {
-            setCurrentChat((prev) => ({ ...prev, members: group.members }));
+            setCurrentChat((prev) => ({ ...prev, ...group, isCurrentMember: isCurrentUserStillMember }));
           }
         }
       });
 
+      // WebRTC Live Call socket listeners
+      socket.current.on("incoming-call", (data) => {
+        console.log("[FRONTEND] incoming-call event received:", data);
+        const isBlocked = currentUser?.blockedUsers?.some(
+          (b) => (b._id || b).toString() === data?.from?.toString()
+        );
+        if (isBlocked) {
+          console.log("[CALL] Dropping call from blocked user:", data?.from);
+          socket.current.emit("end-call", { to: data.from, reason: "blocked" });
+          return;
+        }
+        setIncomingCall(data);
+      });
+
+      socket.current.on("call-ended", (data) => {
+        console.log("[FRONTEND] call-ended event received:", data);
+        setIncomingCall(null);
+      });
 
       socket.current.on("msg-recieve", (data) => {
         console.log("[FRONTEND] msg-recieve event received at ChatPage:", data);
@@ -710,15 +907,29 @@ function ChatPage() {
         const targetChatId = isGroup ? data.groupId : senderId;
         const timestamp = new Date().toISOString();
 
+        // Discard direct messages from blocked users
+        if (!isGroup && senderId) {
+          const isBlocked = currentUser?.blockedUsers?.some(
+            (b) => (b._id || b).toString() === senderId.toString()
+          );
+          if (isBlocked) {
+            console.log("[MESSAGE IGNORED] Direct message from blocked contact ignored:", senderId);
+            return;
+          }
+        }
+
         // Check if message is from the active open chat / group
         if (currentChatRef.current && currentChatRef.current._id === targetChatId) {
           setArrivalMessage({
+            _id: data._id,
             fromSelf: false,
             message: msgText,
             imgpath: imgpath,
             files: files,
             senderName: data.senderName,
             senderAvatar: data.senderAvatar,
+            isAi: Boolean(data.isAi),
+            isAiGenerated: Boolean(data.isAiGenerated),
             isGroup,
             isSystem: Boolean(data.isSystem),
             timestamp,
@@ -764,41 +975,56 @@ function ChatPage() {
         socket.current.disconnect();
       };
     }
-  }, [currentUser]);
+  }, [currentUser?._id]);
+
+  const fetchContactsAndGroups = async (isRetry = false) => {
+    if (!currentUser?._id) return;
+    try {
+      setLoadingContacts(true);
+      setContactsError(null);
+      const [contactsRes, groupsRes] = await Promise.all([
+        axios.get(`${contactsWithLastMessageRoute}/${currentUser._id}`),
+        axios.get(`${getUserGroupsRoute}/${currentUser._id}`).catch(() => ({ data: [] })),
+      ]);
+
+      const contactsList = contactsRes.data || [];
+      const groupsList = groupsRes.data || [];
+
+      setGroups(groupsList);
+
+      // Merge individual contacts and groups for the unified Chats tab
+      const merged = [...groupsList, ...contactsList].sort((a, b) => {
+        const timeA = new Date(a.lastMessageTimestamp || 0).getTime();
+        const timeB = new Date(b.lastMessageTimestamp || 0).getTime();
+        return timeB - timeA;
+      });
+
+      setContacts(merged);
+      if (isRetry) {
+        showToast('success', 'Connected', 'Chats & contacts refreshed successfully!');
+      }
+    } catch (err) {
+      console.error("Error loading contacts and groups:", err);
+      hasLoadedContacts.current = null;
+      const errMsg = err.response?.data?.message || err.message || "Failed to reach server. Please check backend connection.";
+      setContactsError(errMsg);
+      showToast('error', 'Connection Error', errMsg);
+    } finally {
+      setLoadingContacts(false);
+    }
+  };
 
   useEffect(() => {
-    async function fetchData() {
-      if (currentUser) {
-        if (currentUser.isAvtarImageSet) {
-          try {
-            const [contactsRes, groupsRes] = await Promise.all([
-              axios.get(`${contactsWithLastMessageRoute}/${currentUser._id}`),
-              axios.get(`${getUserGroupsRoute}/${currentUser._id}`).catch(() => ({ data: [] })),
-            ]);
-
-            const contactsList = contactsRes.data || [];
-            const groupsList = groupsRes.data || [];
-
-            setGroups(groupsList);
-
-            // Merge individual contacts and groups for the unified Chats tab
-            const merged = [...groupsList, ...contactsList].sort((a, b) => {
-              const timeA = new Date(a.lastMessageTimestamp || 0).getTime();
-              const timeB = new Date(b.lastMessageTimestamp || 0).getTime();
-              return timeB - timeA;
-            });
-
-            setContacts(merged);
-          } catch (err) {
-            console.error("Error loading contacts and groups:", err);
-          }
-        } else {
-          navigate('/avtar');
-        }
+    if (currentUser?._id) {
+      if (currentUser.isAvtarImageSet) {
+        if (hasLoadedContacts.current === currentUser._id) return;
+        hasLoadedContacts.current = currentUser._id;
+        fetchContactsAndGroups();
+      } else {
+        navigate('/avtar');
       }
     }
-    fetchData();
-  }, [currentUser]);
+  }, [currentUser?._id, navigate]);
 
   const handleChatChange = async (chat) => {
     setCurrentChat(chat);
@@ -839,6 +1065,13 @@ function ChatPage() {
   };
 
   const handleStartCall = (contact, type = 'audio') => {
+    const isBlocked = currentUser?.blockedUsers?.some(
+      (b) => (b._id || b).toString() === (contact?._id || contact).toString()
+    );
+    if (isBlocked) {
+      showToast('warning', 'Contact Blocked', 'You have blocked this contact. Unblock to make calls.');
+      return;
+    }
     setActiveCall({ contact, type });
   };
 
@@ -853,81 +1086,174 @@ function ChatPage() {
             right: '24px',
             zIndex: 99999,
             backgroundColor: '#202c33',
-            border: '1px solid #00a884',
+            border: `1px solid ${
+              toastNotification.type === 'error'
+                ? '#ea868f'
+                : toastNotification.type === 'warning'
+                ? '#ffd166'
+                : '#00a884'
+            }`,
             borderRadius: '10px',
             padding: '12px 18px',
             boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
             display: 'flex',
             alignItems: 'center',
             gap: '12px',
-            maxWidth: '360px',
+            maxWidth: '380px',
             animation: 'fadeIn 0.3s ease-out',
           }}
         >
-          <div style={{ color: '#00a884', display: 'flex', alignItems: 'center' }}>
-            <NotificationsActiveIcon style={{ fontSize: '24px' }} />
+          <div
+            style={{
+              color:
+                toastNotification.type === 'error'
+                  ? '#ea868f'
+                  : toastNotification.type === 'warning'
+                  ? '#ffd166'
+                  : '#00a884',
+              display: 'flex',
+              alignItems: 'center',
+              fontSize: '20px',
+            }}
+          >
+            {toastNotification.type === 'error' ? '⚠️' : toastNotification.type === 'success' ? '✅' : 'ℹ️'}
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ color: '#00a884', fontSize: '13px', fontWeight: 'bold' }}>
+            <div
+              style={{
+                color:
+                  toastNotification.type === 'error'
+                    ? '#ea868f'
+                    : toastNotification.type === 'warning'
+                    ? '#ffd166'
+                    : '#00a884',
+                fontSize: '13px',
+                fontWeight: 'bold',
+              }}
+            >
               {toastNotification.title}
             </div>
-            <div style={{ color: '#e9edef', fontSize: '12.5px', marginTop: '2px' }}>
+            <div style={{ color: '#e9edef', fontSize: '12.5px', marginTop: '2px', lineHeight: '1.35' }}>
               {toastNotification.message}
             </div>
           </div>
           <span
             onClick={() => setToastNotification(null)}
-            style={{ color: '#8696a0', cursor: 'pointer', fontSize: '15px', fontWeight: 'bold' }}
+            style={{ color: '#8696a0', cursor: 'pointer', fontSize: '15px', fontWeight: 'bold', padding: '2px' }}
           >
             ✕
           </span>
         </div>
       )}
 
-      {/* Active Call Modal Overlay */}
+      {/* App Passcode Lock Modal */}
+      {isAppLocked && (
+        <PasscodeLockModal
+          currentUser={currentUser}
+          onUnlock={() => {
+            sessionStorage.setItem('chatnex_session_unlocked', 'true');
+            setIsAppLocked(false);
+          }}
+        />
+      )}
+
+      {/* Floating Incoming Call Alert Modal */}
+      {incomingCall && (
+        <IncomingCallModal
+          callData={incomingCall}
+          onAccept={() => {
+            const callerContact = contacts.find(
+              (c) => (c._id || c).toString() === incomingCall.from?.toString()
+            ) || {
+              _id: incomingCall.from,
+              username: incomingCall.callerName,
+              avtarImage: incomingCall.callerAvatar,
+              isGroup: incomingCall.isGroup,
+            };
+            // Pass signalData (SDP offer) + direction so CallModal handles the WebRTC answer
+            setActiveCall({
+              contact: callerContact,
+              type: incomingCall.callType || 'audio',
+              direction: 'incoming',
+              signalData: incomingCall.signalData || null,
+            });
+            setIncomingCall(null);
+          }}
+          onDecline={() => {
+            if (incomingCall && socket?.current) {
+              socket.current.emit('end-call', {
+                to: incomingCall.from,
+                from: currentUser?._id,
+                reason: 'declined',
+              });
+            }
+            setIncomingCall(null);
+          }}
+        />
+      )}
+
+      {/* Active WebRTC Call Modal Overlay */}
       {activeCall && (
         <CallModal
           callData={activeCall}
           contacts={contacts}
           currentUser={currentUser}
+          socket={socket}
           onClose={() => setActiveCall(null)}
           onEndCall={handleEndCall}
         />
       )}
 
-      {/* Left Icon Navigation Strip */}
+
+      {/* Modern WhatsApp Sidebar Tab Bar (60px) */}
       <div
-        className='nav-sidebar'
+        className='sidebar-left-nav'
         style={{
-          width: '56px',
-          minWidth: '56px',
+          width: '60px',
+          minWidth: '60px',
+          height: '100%',
           backgroundColor: '#202c33',
           borderRight: '1px solid rgba(255, 255, 255, 0.08)',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '14px 0',
+          padding: '16px 0',
           boxSizing: 'border-box',
-          zIndex: 20,
+          zIndex: 10,
         }}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', width: '100%' }}>
-          {/* Brand Logo */}
-          <div title='ChatNex' style={{ color: '#00a884', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '4px' }}>
-            <FitbitIcon style={{ fontSize: '28px' }} />
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '18px', width: '100%' }}>
+          {/* Logo / Brand Icon */}
+          <div
+            style={{
+              width: '36px',
+              height: '36px',
+              borderRadius: '8px',
+              background: 'linear-gradient(135deg, #00a884, #008f6f)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#111b21',
+              boxShadow: '0 2px 8px rgba(0, 168, 132, 0.4)',
+            }}
+          >
+            <FitbitIcon style={{ fontSize: '22px' }} />
           </div>
 
           {/* Chats Action Tab */}
           <div
             title='Chats'
-            onClick={() => setActiveTab('chats')}
+            onClick={() => {
+              setActiveTab('chats');
+              setIsSettingsOpen(false);
+            }}
             style={{
-              color: activeTab === 'chats' ? '#00a884' : '#8696a0',
+              color: activeTab === 'chats' && !isSettingsOpen ? '#00a884' : '#8696a0',
               cursor: 'pointer',
               padding: '8px',
               borderRadius: '50%',
-              backgroundColor: activeTab === 'chats' ? 'rgba(0,168,132,0.15)' : 'transparent',
+              backgroundColor: activeTab === 'chats' && !isSettingsOpen ? 'rgba(0,168,132,0.15)' : 'transparent',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -937,16 +1263,41 @@ function ChatPage() {
             <MessageIcon style={{ fontSize: '22px' }} />
           </div>
 
-          {/* Calls Action Tab */}
+          {/* Stories / Status Tab */}
           <div
-            title='Calls'
-            onClick={() => setActiveTab('calls')}
+            title='Status & Stories'
+            onClick={() => {
+              setActiveTab('status');
+              setIsSettingsOpen(false);
+            }}
             style={{
-              color: activeTab === 'calls' ? '#00a884' : '#8696a0',
+              color: activeTab === 'status' && !isSettingsOpen ? '#00a884' : '#8696a0',
               cursor: 'pointer',
               padding: '8px',
               borderRadius: '50%',
-              backgroundColor: activeTab === 'calls' ? 'rgba(0,168,132,0.15)' : 'transparent',
+              backgroundColor: activeTab === 'status' && !isSettingsOpen ? 'rgba(0,168,132,0.15)' : 'transparent',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.2s',
+            }}
+          >
+            <DonutLargeIcon style={{ fontSize: '22px' }} />
+          </div>
+
+          {/* Calls Action Tab */}
+          <div
+            title='Calls'
+            onClick={() => {
+              setActiveTab('calls');
+              setIsSettingsOpen(false);
+            }}
+            style={{
+              color: activeTab === 'calls' && !isSettingsOpen ? '#00a884' : '#8696a0',
+              cursor: 'pointer',
+              padding: '8px',
+              borderRadius: '50%',
+              backgroundColor: activeTab === 'calls' && !isSettingsOpen ? 'rgba(0,168,132,0.15)' : 'transparent',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -959,13 +1310,16 @@ function ChatPage() {
           {/* Groups Action Tab */}
           <div
             title='Groups'
-            onClick={() => setActiveTab('groups')}
+            onClick={() => {
+              setActiveTab('groups');
+              setIsSettingsOpen(false);
+            }}
             style={{
-              color: activeTab === 'groups' ? '#00a884' : '#8696a0',
+              color: activeTab === 'groups' && !isSettingsOpen ? '#00a884' : '#8696a0',
               cursor: 'pointer',
               padding: '8px',
               borderRadius: '50%',
-              backgroundColor: activeTab === 'groups' ? 'rgba(0,168,132,0.15)' : 'transparent',
+              backgroundColor: activeTab === 'groups' && !isSettingsOpen ? 'rgba(0,168,132,0.15)' : 'transparent',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -976,32 +1330,108 @@ function ChatPage() {
           </div>
         </div>
 
-        {/* Profile Avatar Button at Bottom */}
-        <Profile
-          currentUser={currentUser}
-          currentUserName={currentUser?.username}
-          currentUserImage={currentUser?.avtarImage}
-          email={currentUser?.email}
-          onUpdateAvatar={(newImage) => {
-            setCurrentUser((prev) => ({
-              ...prev,
-              isAvtarImageSet: true,
-              avtarImage: newImage,
-            }));
-          }}
-        />
+        {/* Bottom Actions: Settings, App Lock, Profile */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', width: '100%' }}>
+          {/* Quick Lock Button (If Passcode is configured) */}
+          {currentUser?.isPasscodeEnabled && (
+            <div
+              title='Lock App Now'
+              onClick={() => {
+                sessionStorage.removeItem('chatnex_session_unlocked');
+                setIsAppLocked(true);
+              }}
+              style={{
+                color: '#f15c6d',
+                cursor: 'pointer',
+                padding: '8px',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s',
+              }}
+            >
+              <LockIcon style={{ fontSize: '20px' }} />
+            </div>
+          )}
+
+          {/* Settings Button */}
+          <div
+            title='Settings'
+            onClick={() => setIsSettingsOpen((prev) => !prev)}
+            style={{
+              color: isSettingsOpen ? '#00a884' : '#8696a0',
+              cursor: 'pointer',
+              padding: '8px',
+              borderRadius: '50%',
+              backgroundColor: isSettingsOpen ? 'rgba(0,168,132,0.15)' : 'transparent',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.2s',
+            }}
+          >
+            <SettingsIcon style={{ fontSize: '22px' }} />
+          </div>
+
+          {/* Profile Avatar Button */}
+          <Profile
+            currentUser={currentUser}
+            currentUserName={currentUser?.username}
+            currentUserImage={currentUser?.avtarImage}
+            email={currentUser?.email}
+            onUpdateAvatar={(newImage) => {
+              setCurrentUser((prev) => ({
+                ...prev,
+                isAvtarImageSet: true,
+                avtarImage: newImage,
+              }));
+            }}
+          />
+        </div>
       </div>
 
       {/* Main App Window (Active Sidebar Panel + Chat Window) */}
-      <div style={{ flex: 1, display: 'flex', height: '100%', overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'flex', height: '100%', overflow: 'hidden', position: 'relative' }}>
         {/* Dynamic Sidebar (340px) */}
-        <div style={{ width: '340px', minWidth: '280px', maxWidth: '380px', borderRight: '1px solid rgba(255, 255, 255, 0.08)', height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: '#111b21', flexShrink: 0 }}>
+        <div style={{ width: '340px', minWidth: '280px', maxWidth: '380px', borderRight: '1px solid rgba(255, 255, 255, 0.08)', height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: '#111b21', flexShrink: 0, position: 'relative' }}>
+          {/* Settings Drawer overlay over sidebar */}
+          {isSettingsOpen && (
+            <SettingsDrawer
+              currentUser={currentUser}
+              contacts={contacts}
+              onClose={() => setIsSettingsOpen(false)}
+              onUpdateCurrentUser={(updated) => {
+                setCurrentUser(updated);
+                localStorage.setItem('chat-app-user', JSON.stringify(updated));
+              }}
+              onLockAppNow={() => {
+                setIsSettingsOpen(false);
+                sessionStorage.removeItem('chatnex_session_unlocked');
+                setIsAppLocked(true);
+              }}
+              showToast={showToast}
+            />
+          )}
+
           {activeTab === 'chats' && (
             <Contacts
               contacts={contacts}
               currentUser={currentUser}
               changeChat={handleChatChange}
               unreadMessages={unreadMessages}
+              onlineUsers={onlineUsers}
+              loading={loadingContacts}
+              error={contactsError}
+              onRetry={() => fetchContactsAndGroups(true)}
+            />
+          )}
+
+          {activeTab === 'status' && (
+            <StatusPanel
+              currentUser={currentUser}
+              socket={socket}
+              showToast={showToast}
             />
           )}
 
@@ -1014,6 +1444,7 @@ function ChatPage() {
               onStartCall={handleStartCall}
               onClearCallLogs={handleClearCallLogs}
               onSelectContact={(contact) => setSelectedCallContact(contact)}
+              showToast={showToast}
             />
           )}
 
@@ -1028,6 +1459,7 @@ function ChatPage() {
                 handleChatChange(group);
                 setActiveTab('chats');
               }}
+              showToast={showToast}
             />
           )}
         </div>
@@ -1052,6 +1484,7 @@ function ChatPage() {
               currentUser={currentUser}
               contacts={contacts}
               socket={socket}
+              onlineUsers={onlineUsers}
               arrivalMessage={arrivalMessage}
               onMessageSent={updateContactLastMessage}
               onStartCall={handleStartCall}
@@ -1064,8 +1497,15 @@ function ChatPage() {
               onMakeAdminInGroup={handleMakeAdminInGroup}
               onDismissAdminInGroup={handleDismissAdminInGroup}
               onUpdateGroupAvatar={handleUpdateGroupAvatar}
+              onUpdateGroupDetails={handleUpdateGroupDetails}
+              onCreateSimilarGroup={handleCreateSimilarGroup}
               onLeaveGroup={handleLeaveGroup}
               onDeleteGroup={handleDeleteGroup}
+              onUpdateCurrentUser={(updated) => {
+                setCurrentUser(updated);
+                localStorage.setItem('chat-app-user', JSON.stringify(updated));
+              }}
+              showToast={showToast}
             />
           )}
         </div>

@@ -308,3 +308,91 @@ module.exports.getContactsWithLastMessage = async (req, res, next) => {
         next(ex);
     }
 };
+
+module.exports.updatePrivacySettings = async (req, res, next) => {
+    try {
+        const { userId, privacySettings } = req.body;
+        const user = await User.findByIdAndUpdate(
+            userId,
+            { privacySettings },
+            { new: true }
+        ).select("-password -passcode");
+        if (!user) return res.json({ status: false, msg: "User not found" });
+        return res.json({ status: true, user, privacySettings: user.privacySettings });
+    } catch (ex) {
+        next(ex);
+    }
+};
+
+module.exports.blockUser = async (req, res, next) => {
+    try {
+        const { userId, targetUserId } = req.body;
+        const user = await User.findByIdAndUpdate(
+            userId,
+            { $addToSet: { blockedUsers: targetUserId } },
+            { new: true }
+        ).populate("blockedUsers", "username email avtarImage isAvtarImageSet");
+        return res.json({ status: true, blockedUsers: user.blockedUsers || [] });
+    } catch (ex) {
+        next(ex);
+    }
+};
+
+module.exports.unblockUser = async (req, res, next) => {
+    try {
+        const { userId, targetUserId } = req.body;
+        const user = await User.findByIdAndUpdate(
+            userId,
+            { $pull: { blockedUsers: targetUserId } },
+            { new: true }
+        ).populate("blockedUsers", "username email avtarImage isAvtarImageSet");
+        return res.json({ status: true, blockedUsers: user.blockedUsers || [] });
+    } catch (ex) {
+        next(ex);
+    }
+};
+
+module.exports.getBlockedUsers = async (req, res, next) => {
+    try {
+        const { userId } = req.params;
+        const user = await User.findById(userId).populate("blockedUsers", "username email avtarImage isAvtarImageSet");
+        if (!user) return res.json({ status: false, msg: "User not found" });
+        return res.json({ status: true, blockedUsers: user.blockedUsers || [] });
+    } catch (ex) {
+        next(ex);
+    }
+};
+
+module.exports.setPasscode = async (req, res, next) => {
+    try {
+        const { userId, passcode, isPasscodeEnabled } = req.body;
+        const updateData = { isPasscodeEnabled: !!isPasscodeEnabled };
+        if (passcode) {
+            updateData.passcode = await bcrypt.hash(passcode.toString(), 10);
+        }
+        if (isPasscodeEnabled === false) {
+            updateData.passcode = null;
+        }
+        const user = await User.findByIdAndUpdate(userId, updateData, { new: true }).select("-password -passcode");
+        return res.json({ status: true, isPasscodeEnabled: user.isPasscodeEnabled });
+    } catch (ex) {
+        next(ex);
+    }
+};
+
+module.exports.verifyPasscode = async (req, res, next) => {
+    try {
+        const { userId, passcode } = req.body;
+        const user = await User.findById(userId);
+        if (!user || !user.passcode) {
+            return res.json({ status: false, msg: "No passcode set" });
+        }
+        const isValid = await bcrypt.compare(passcode.toString(), user.passcode);
+        if (!isValid) {
+            return res.json({ status: false, msg: "Incorrect passcode PIN" });
+        }
+        return res.json({ status: true, msg: "Passcode verified" });
+    } catch (ex) {
+        next(ex);
+    }
+};

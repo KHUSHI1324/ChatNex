@@ -12,6 +12,11 @@ console.log(allUsersRoute);
 export const sendMessageRoute = `${host}/api/messages/addmsg`;
 export const getAllMessagesRoute = `${host}/api/messages/getmsg`;
 export const markReadRoute = `${host}/api/messages/mark-read`;
+export const reactMessageRoute = `${host}/api/messages/react`;
+export const editMessageRoute = `${host}/api/messages/edit`;
+export const deleteMessageRoute = `${host}/api/messages/delete`;
+export const pinMessageRoute = `${host}/api/messages/pin`;
+export const starMessageRoute = `${host}/api/messages/star`;
 export const imageapi = `${host}/api/messages/upload`;
 export const createGroupRoute = `${host}/api/groups/create`;
 export const getUserGroupsRoute = `${host}/api/groups/user-groups`;
@@ -20,6 +25,29 @@ export const removeMemberGroupRoute = `${host}/api/groups/remove-member`;
 export const makeAdminGroupRoute = `${host}/api/groups/make-admin`;
 export const dismissAdminGroupRoute = `${host}/api/groups/dismiss-admin`;
 export const updateGroupAvatarRoute = `${host}/api/groups/update-avatar`;
+export const updateGroupDetailsRoute = `${host}/api/groups/update-details`;
 export const leaveGroupRoute = `${host}/api/groups/leave`;
 export const deleteGroupRoute = `${host}/api/groups/delete`;
-console.log(imageapi);
+
+// AI Superpower Routes
+export const aiChatRoute = `${host}/api/ai/chat`;
+export const aiTranslateRoute = `${host}/api/ai/translate`;
+export const aiImagineRoute = `${host}/api/ai/imagine`;
+export const aiTranscribeRoute = `${host}/api/ai/transcribe`;
+export const aiRewriteRoute = `${host}/api/ai/rewrite`;
+export const getAISessionsRoute = `${host}/api/messages/getaisessions`;
+export const deleteAISessionRoute = `${host}/api/messages/deleteaisession`;
+
+// Privacy & Security Routes
+export const updatePrivacySettingsRoute = `${host}/api/auth/privacy-settings`;
+export const blockUserRoute = `${host}/api/auth/block-user`;
+export const unblockUserRoute = `${host}/api/auth/unblock-user`;
+export const getBlockedUsersRoute = `${host}/api/auth/blocked-users`;
+export const setPasscodeRoute = `${host}/api/auth/set-passcode`;
+export const verifyPasscodeRoute = `${host}/api/auth/verify-passcode`;
+
+// Stories / Status Routes
+export const createStatusRoute = `${host}/api/status/create`;
+export const getStatusRoute = `${host}/api/status/get`;
+export const viewStatusRoute = `${host}/api/status/view`;
+export const deleteStatusRoute = `${host}/api/status/delete`;

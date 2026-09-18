@@ -10,6 +10,7 @@ const {
   deleteGroup,
   makeAdmin,
   dismissAdmin,
+  updateGroupDetails,
 } = require("../controllers/groupController");
 
 router.post("/create", createGroup);
@@ -19,6 +20,7 @@ router.put("/remove-member", removeMember);
 router.put("/make-admin", makeAdmin);
 router.put("/dismiss-admin", dismissAdmin);
 router.put("/update-avatar", updateGroupAvatar);
+router.put("/update-details", updateGroupDetails);
 router.post("/leave", leaveGroup);
 router.delete("/delete", deleteGroup);
 

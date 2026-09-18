@@ -200,6 +200,8 @@ exports.getUserGroups = async (req, res, next) => {
           _id: grp._id,
           name: grp.name,
           username: grp.name,
+          description: grp.description || "",
+          permissions: grp.permissions || { sendMessages: "everyone", editGroupInfo: "everyone" },
           admin: grp.admin,
           admins: grp.admins && grp.admins.length > 0 ? grp.admins : (grp.admin ? [grp.admin] : []),
           members: grp.members,
@@ -622,12 +624,118 @@ exports.updateGroupAvatar = async (req, res, next) => {
         members: populatedGroup.members,
         pastMembers: populatedGroup.pastMembers || [],
         avtarImage: populatedGroup.groupImage || DEFAULT_GROUP_SVG,
+        description: populatedGroup.description || "",
+        permissions: populatedGroup.permissions || { sendMessages: "everyone", editGroupInfo: "everyone" },
         isGroup: true,
         isAvtarImageSet: true,
       },
     });
   } catch (error) {
     console.error("Error updating group avatar:", error);
+    next(error);
+  }
+};
+
+exports.updateGroupDetails = async (req, res, next) => {
+  try {
+    const { groupId, name, description, permissions, updatedBy: updatedByField, userId } = req.body;
+    const updatedBy = updatedByField || userId;
+    if (!groupId) {
+      return res.status(400).json({ status: false, msg: "Group ID is required" });
+    }
+
+    const group = await Group.findById(groupId);
+    if (!group) {
+      return res.status(404).json({ status: false, msg: "Group not found" });
+    }
+
+    const isAdmin = isGroupAdmin(group, updatedBy);
+    const allowEditInfo = group.permissions?.editGroupInfo !== "admins" || isAdmin;
+    if (!allowEditInfo) {
+      return res.status(403).json({ status: false, msg: "Only admins can edit group info" });
+    }
+
+    let systemText = "";
+    const updaterUser = updatedBy ? await User.findById(updatedBy) : null;
+    const updaterName = updaterUser?.username || "Admin";
+
+    if (name && name.trim() && name.trim() !== group.name) {
+      systemText = `${updaterName} changed the group subject to "${name.trim()}"`;
+      group.name = name.trim();
+    }
+
+    if (description !== undefined && description.trim() !== (group.description || "")) {
+      group.description = description.trim();
+      if (!systemText) {
+        systemText = `${updaterName} updated the group description`;
+      }
+    }
+
+    if (permissions && typeof permissions === "object" && isAdmin) {
+      group.permissions = {
+        sendMessages: permissions.sendMessages || group.permissions?.sendMessages || "everyone",
+        editGroupInfo: permissions.editGroupInfo || group.permissions?.editGroupInfo || "everyone",
+      };
+      if (!systemText) {
+        systemText = `${updaterName} updated group permissions`;
+      }
+    }
+
+    await group.save();
+
+    const populatedGroup = await Group.findById(group._id)
+      .populate("members", "username email avtarImage _id")
+      .populate("admin", "username email avtarImage _id")
+      .populate("admins", "username email avtarImage _id");
+
+    let systemMsg = null;
+    if (systemText) {
+      systemMsg = await messageModel.create({
+        message: { text: systemText },
+        users: populatedGroup.members.map((m) => (m._id || m).toString()),
+        sender: new mongoose.Types.ObjectId(updatedBy || group.admin),
+        groupId: group._id,
+        isGroup: true,
+        isSystem: true,
+        read: true,
+        createdAt: new Date(),
+      });
+    }
+
+    return res.json({
+      status: true,
+      msg: "Group details updated successfully",
+      group: {
+        _id: populatedGroup._id,
+        name: populatedGroup.name,
+        username: populatedGroup.name,
+        description: populatedGroup.description || "",
+        permissions: populatedGroup.permissions || { sendMessages: "everyone", editGroupInfo: "everyone" },
+        admin: populatedGroup.admin,
+        admins: populatedGroup.admins && populatedGroup.admins.length > 0 ? populatedGroup.admins : [populatedGroup.admin],
+        members: populatedGroup.members,
+        pastMembers: populatedGroup.pastMembers || [],
+        isCurrentMember: true,
+        avtarImage: populatedGroup.groupImage || DEFAULT_GROUP_SVG,
+        isGroup: true,
+        isAvtarImageSet: true,
+      },
+      systemMessage: systemMsg
+        ? {
+            _id: systemMsg._id,
+            fromSelf: true,
+            senderId: updatedBy,
+            senderName: updaterName,
+            message: systemText,
+            isGroup: true,
+            groupId: group._id,
+            isSystem: true,
+            timestamp: systemMsg.createdAt,
+          }
+        : null,
+    });
+  } catch (error) {
+    console.error("Error updating group details:", error);
     next(error);
   }
 };
@@ -705,7 +813,6 @@ exports.leaveGroup = async (req, res, next) => {
         admins: populatedGroup.admins && populatedGroup.admins.length > 0 ? populatedGroup.admins : [populatedGroup.admin],
         members: populatedGroup.members,
         pastMembers: populatedGroup.pastMembers || [],
-        isCurrentMember: false,
         avtarImage: populatedGroup.groupImage || DEFAULT_GROUP_SVG,
         isGroup: true,
         isAvtarImageSet: true,

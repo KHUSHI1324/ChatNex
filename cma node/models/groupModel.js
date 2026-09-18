@@ -34,6 +34,23 @@ const groupSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    description: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    permissions: {
+      sendMessages: {
+        type: String,
+        enum: ["everyone", "admins"],
+        default: "everyone",
+      },
+      editGroupInfo: {
+        type: String,
+        enum: ["everyone", "admins"],
+        default: "everyone",
+      },
+    },
     isGroup: {
       type: Boolean,
       default: true,

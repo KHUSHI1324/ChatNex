@@ -24,7 +24,37 @@ const userSchema = new mongoose.Schema({
     avtarImage: {
         type: String,
         default: "",
-    }
+    },
+    privacySettings: {
+        lastSeen: {
+            type: String,
+            enum: ['everyone', 'contacts', 'nobody'],
+            default: 'everyone',
+        },
+        readReceipts: {
+            type: Boolean,
+            default: true,
+        },
+        profilePhoto: {
+            type: String,
+            enum: ['everyone', 'contacts', 'nobody'],
+            default: 'everyone',
+        },
+    },
+    blockedUsers: [
+        {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "users",
+        }
+    ],
+    passcode: {
+        type: String,
+        default: null,
+    },
+    isPasscodeEnabled: {
+        type: Boolean,
+        default: false,
+    },
 });
 
 const UserModel = mongoose.models.users || mongoose.model("users", userSchema);
