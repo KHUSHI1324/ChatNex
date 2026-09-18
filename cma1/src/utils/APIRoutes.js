@@ -51,3 +51,8 @@ export const createStatusRoute = `${host}/api/status/create`;
 export const getStatusRoute = `${host}/api/status/get`;
 export const viewStatusRoute = `${host}/api/status/view`;
 export const deleteStatusRoute = `${host}/api/status/delete`;
+
+// Call History Database Routes
+export const logCallRoute = `${host}/api/calls/log`;
+export const getCallLogsRoute = `${host}/api/calls/user`;
+export const clearCallLogsRoute = `${host}/api/calls/clear`;

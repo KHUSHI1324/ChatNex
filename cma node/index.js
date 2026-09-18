@@ -12,12 +12,14 @@ const server = http.createServer(app);
 require("./models/userModels");
 require("./models/groupModel");
 require("./models/messageModel");
+require("./models/callModel");
 
 const userRoutes = require("./routes/userRoutes");
 const messageRoute = require("./routes/messages.Routes");
 const groupRoute = require("./routes/groupRoutes");
 const aiRoutes = require("./routes/aiRoutes");
 const statusRoutes = require("./routes/statusRoutes");
+const callRoutes = require("./routes/callRoutes");
 
 app.use(cors({
   // origin: "http://localhost:3001", // Change this to the origin of your frontend server 
@@ -29,6 +31,7 @@ app.use("/api/messages", messageRoute);
 app.use("/api/groups", groupRoute);
 app.use("/api/ai", aiRoutes);
 app.use("/api/status", statusRoutes);
+app.use("/api/calls", callRoutes);
 
 const PORT = process.env.PORT || 1000;
 

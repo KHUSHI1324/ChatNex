@@ -7,7 +7,6 @@ import PhoneCallbackIcon from '@mui/icons-material/PhoneCallback';
 import PhoneMissedIcon from '@mui/icons-material/PhoneMissed';
 import AddIcCallIcon from '@mui/icons-material/AddIcCall';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import CloseIcon from '@mui/icons-material/Close';
 import { getAvatarSrc } from '../utils/avatarHelper';
 
 export default function CallsPanel({

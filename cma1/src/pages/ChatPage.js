@@ -26,6 +26,9 @@ import {
   deleteGroupRoute,
   markReadRoute,
   getUserRoute,
+  logCallRoute,
+  getCallLogsRoute,
+  clearCallLogsRoute,
   host,
 } from '../utils/APIRoutes';
 import Welcome from '../components/Welcome';
@@ -44,8 +47,8 @@ function ChatPage() {
   const navigate = useNavigate();
   const [contacts, setContacts] = useState([]);
   const [groups, setGroups] = useState([]);
-  const [currentUser, setCurrentUser] = useState(undefined);
   const [currentChat, setCurrentChat] = useState(undefined);
+  const [currentUser, setCurrentUser] = useState(undefined);
   const [arrivalMessage, setArrivalMessage] = useState(null);
   const [unreadMessages, setUnreadMessages] = useState({});
   const [isLoaded, setIsLoaded] = useState(false);
@@ -68,69 +71,96 @@ function ChatPage() {
     }, 4500);
   };
 
-  // Load call logs from localStorage or initialize with sample logs
+  // Request browser Web Notifications permission on initial interaction
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().catch(console.warn);
+      }
+    }
+  }, []);
+
+  // Fetch persistent call logs from MongoDB
+  const fetchCallLogs = async () => {
+    if (!currentUser?._id) return;
+    try {
+      const res = await axios.get(`${getCallLogsRoute}/${currentUser._id}`);
+      if (res.data?.status && Array.isArray(res.data.callLogs)) {
+        setCallLogs(res.data.callLogs);
+      }
+    } catch (err) {
+      console.warn('Error fetching call logs from DB, fallback to local:', err.message);
+      const saved = localStorage.getItem(`chatnex_call_history_${currentUser._id}`);
+      if (saved) {
+        try { setCallLogs(JSON.parse(saved)); } catch (_) {}
+      }
+    }
+  };
+
   useEffect(() => {
     if (currentUser?._id) {
-      const storageKey = `chatnex_call_history_${currentUser._id}`;
-      const saved = localStorage.getItem(storageKey);
-      if (saved) {
-        try {
-          setCallLogs(JSON.parse(saved));
-          return;
-        } catch (e) {
-          console.error('Error loading call logs:', e);
-        }
-      }
-
-      // Generate realistic initial call logs based on loaded contacts
-      if (contacts && contacts.length > 0) {
-        const individualContacts = contacts.filter((c) => !c.isGroup);
-        const sampleLogs = individualContacts.slice(0, 4).map((c, i) => {
-          const now = new Date();
-          const pastTime = new Date(now.getTime() - (i + 1) * 3600 * 1000 * 5).toISOString();
-          const isMissed = i === 1;
-          const isIncoming = i === 2;
-
-          return {
-            id: `call_${Date.now()}_${i}`,
-            contact: c,
-            type: i % 2 === 0 ? 'video' : 'audio',
-            direction: isMissed ? 'missed' : isIncoming ? 'incoming' : 'outgoing',
-            status: isMissed ? 'missed' : 'attended',
-            duration: isMissed ? 0 : (i + 1) * 75 + 12,
-            timestamp: pastTime,
-          };
-        });
-
-        setCallLogs(sampleLogs);
-        localStorage.setItem(storageKey, JSON.stringify(sampleLogs));
-      }
+      fetchCallLogs();
     }
-  }, [currentUser, contacts]);
+  }, [currentUser?._id]);
 
-  const saveCallLogs = (newLogs) => {
-    setCallLogs(newLogs);
-    if (currentUser?._id) {
-      localStorage.setItem(`chatnex_call_history_${currentUser._id}`, JSON.stringify(newLogs));
-    }
-  };
+  const handleEndCall = async (endedCallData) => {
+    const isGroup = Boolean(endedCallData?.contact?.isGroup);
+    const targetContactId = endedCallData?.contact?._id;
+    const duration = endedCallData.duration || 0;
+    const callType = endedCallData.type || 'audio';
+    const status = endedCallData.status === 'attended' ? 'answered' : (endedCallData.status || 'ended');
+    const startedAt = endedCallData.startedAt || new Date(Date.now() - duration * 1000).toISOString();
+    const endedAt = new Date().toISOString();
 
-  const handleEndCall = (endedCallData) => {
-    const newLog = {
-      id: `call_${Date.now()}`,
+    const localLog = {
+      _id: `call_${Date.now()}`,
       contact: endedCallData.contact,
-      type: endedCallData.type || 'audio',
+      type: callType,
+      callType: callType,
       direction: endedCallData.direction || 'outgoing',
-      status: endedCallData.status || 'attended',
-      duration: endedCallData.duration || 0,
-      timestamp: endedCallData.timestamp || new Date().toISOString(),
+      status: status,
+      duration: duration,
+      timestamp: endedAt,
     };
 
-    saveCallLogs([newLog, ...callLogs]);
+    setCallLogs((prev) => [localLog, ...prev]);
+
+    // Persist to MongoDB
+    if (currentUser?._id && targetContactId) {
+      try {
+        const payload = {
+          caller: endedCallData.direction === 'incoming' ? targetContactId : currentUser._id,
+          receiver: isGroup ? null : (endedCallData.direction === 'incoming' ? currentUser._id : targetContactId),
+          isGroup: isGroup,
+          groupId: isGroup ? targetContactId : null,
+          participants: isGroup && Array.isArray(endedCallData.contact.members) ? endedCallData.contact.members : [currentUser._id, targetContactId],
+          callType: callType,
+          status: status,
+          duration: duration,
+          startedAt: startedAt,
+          endedAt: endedAt,
+        };
+        const res = await axios.post(logCallRoute, payload);
+        if (res.data?.status && res.data.call) {
+          fetchCallLogs();
+        }
+      } catch (err) {
+        console.warn('Error logging call to MongoDB:', err.message);
+      }
+    }
   };
 
-  const handleClearCallLogs = () => {
-    saveCallLogs([]);
+  const handleClearCallLogs = async () => {
+    setCallLogs([]);
+    if (currentUser?._id) {
+      localStorage.removeItem(`chatnex_call_history_${currentUser._id}`);
+      try {
+        await axios.delete(`${clearCallLogsRoute}/${currentUser._id}`);
+        showToast('info', 'Call History Cleared', 'All call logs have been removed.');
+      } catch (err) {
+        console.warn('Error clearing call logs from DB:', err.message);
+      }
+    }
   };
 
   const currentChatRef = useRef(currentChat);
@@ -890,6 +920,23 @@ function ChatPage() {
           return;
         }
         setIncomingCall(data);
+
+        // Native Browser Push Notification if tab/window is minimized
+        if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted' && document.hidden) {
+          try {
+            const notif = new Notification(`📞 Incoming ${data.callType === 'video' ? 'Video' : 'Voice'} Call`, {
+              body: `${data.callerName || 'Someone'} is calling you on ChatNex...`,
+              icon: data.callerAvatar || '/favicon.ico',
+              requireInteraction: true,
+            });
+            notif.onclick = () => {
+              window.focus();
+              notif.close();
+            };
+          } catch (notifErr) {
+            console.warn('Call Web Notification failed:', notifErr);
+          }
+        }
       });
 
       socket.current.on("call-ended", (data) => {
@@ -915,6 +962,24 @@ function ChatPage() {
           if (isBlocked) {
             console.log("[MESSAGE IGNORED] Direct message from blocked contact ignored:", senderId);
             return;
+          }
+        }
+
+        // Native Browser Push Notification if tab is hidden or minimized
+        if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted' && document.hidden) {
+          try {
+            const title = isGroup ? `👥 ${data.groupName || 'Group'}: ${data.senderName || 'Member'}` : (data.senderName || 'ChatNex Message');
+            const body = msgText || (files.length > 0 ? `📎 Sent ${files.length} file(s)` : imgpath ? '📷 Sent a photo' : 'New message');
+            const notif = new Notification(title, {
+              body,
+              icon: data.senderAvatar || '/favicon.ico',
+            });
+            notif.onclick = () => {
+              window.focus();
+              notif.close();
+            };
+          } catch (notifErr) {
+            console.warn('Message Web Notification failed:', notifErr);
           }
         }
 
@@ -1205,22 +1270,21 @@ function ChatPage() {
       )}
 
 
-      {/* Modern WhatsApp Sidebar Tab Bar (60px) */}
+      {/* Left Navigation Rail (60px) */}
       <div
-        className='sidebar-left-nav'
+        className="app-left-rail"
         style={{
           width: '60px',
-          minWidth: '60px',
           height: '100%',
           backgroundColor: '#202c33',
-          borderRight: '1px solid rgba(255, 255, 255, 0.08)',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '16px 0',
-          boxSizing: 'border-box',
+          padding: '12px 0',
+          borderRight: '1px solid rgba(255, 255, 255, 0.08)',
           zIndex: 10,
+          flexShrink: 0,
         }}
       >
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '18px', width: '100%' }}>
@@ -1394,7 +1458,10 @@ function ChatPage() {
       {/* Main App Window (Active Sidebar Panel + Chat Window) */}
       <div style={{ flex: 1, display: 'flex', height: '100%', overflow: 'hidden', position: 'relative' }}>
         {/* Dynamic Sidebar (340px) */}
-        <div style={{ width: '340px', minWidth: '280px', maxWidth: '380px', borderRight: '1px solid rgba(255, 255, 255, 0.08)', height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: '#111b21', flexShrink: 0, position: 'relative' }}>
+        <div
+          className={`app-dynamic-sidebar ${currentChat ? 'has-active-chat' : ''}`}
+          style={{ width: '340px', minWidth: '280px', maxWidth: '380px', borderRight: '1px solid rgba(255, 255, 255, 0.08)', height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: '#111b21', flexShrink: 0, position: 'relative' }}
+        >
           {/* Settings Drawer overlay over sidebar */}
           {isSettingsOpen && (
             <SettingsDrawer
@@ -1465,7 +1532,10 @@ function ChatPage() {
         </div>
 
         {/* Active View: ChatContainer / CallInfoView / Welcome */}
-        <div style={{ flex: 1, height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: '#0b141a', overflow: 'hidden' }}>
+        <div
+          className={`app-chat-window ${currentChat ? 'active' : ''}`}
+          style={{ flex: 1, height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: '#0b141a', overflow: 'hidden' }}
+        >
           {activeTab === 'calls' ? (
             <CallInfoView
               contact={selectedCallContact}
@@ -1505,6 +1575,7 @@ function ChatPage() {
                 setCurrentUser(updated);
                 localStorage.setItem('chat-app-user', JSON.stringify(updated));
               }}
+              onBackToChats={() => setCurrentChat(undefined)}
               showToast={showToast}
             />
           )}

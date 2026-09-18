@@ -669,6 +669,8 @@ input{
   background-color: #202c33;
   box-sizing: border-box;
   width: 100%;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .chat-Input .button-container {
@@ -680,7 +682,7 @@ input{
 .chat-Input .button-container .head {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
 
 .chat-Input .button-container .head .emoji {
@@ -722,18 +724,22 @@ input{
 
 .input-container {
   flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   background-color: #2a3942;
   border-radius: 8px;
   padding: 6px 14px;
-  gap: 10px;
+  gap: 8px;
   box-sizing: border-box;
   height: 42px;
+  width: 100%;
 }
 
 .input-container input {
   flex: 1;
+  min-width: 0;
+  width: 100%;
   background-color: transparent;
   color: #e9edef;
   border: none;
@@ -759,6 +765,7 @@ input{
   color: #8696a0;
   padding: 4px;
   border-radius: 50%;
+  flex-shrink: 0;
   transition: color 0.2s ease, transform 0.15s ease;
 }
 
@@ -769,6 +776,17 @@ input{
 
 .input-container button.submit svg {
   font-size: 22px;
+}
+
+/* In-Chat Search Highlight */
+.highlight {
+  background-color: #ffd700 !important;
+  color: #000000 !important;
+  font-weight: 700 !important;
+  padding: 0 3px !important;
+  border-radius: 2px !important;
+  box-shadow: none !important;
+  display: inline !important;
 }
 
 @keyframes pulse {
@@ -1014,3 +1032,73 @@ input{
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* Mobile Responsive Layout & Back Navigation */
+.mobile-back-btn {
+  display: none !important;
+}
+
+@media (max-width: 768px) {
+  .mobile-back-btn {
+    display: flex !important;
+  }
+
+  .app-left-rail {
+    width: 48px !important;
+    min-width: 48px !important;
+  }
+
+  /* In chat tab on mobile: if chat is active, hide sidebar */
+  .app-dynamic-sidebar.has-active-chat {
+    display: none !important;
+  }
+
+  .app-dynamic-sidebar {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    flex: 1 !important;
+  }
+
+  /* In chat tab on mobile: if no chat is active, hide chat/welcome window */
+  .app-chat-window:not(.active) {
+    display: none !important;
+  }
+
+  .app-chat-window.active {
+    display: flex !important;
+    width: 100% !important;
+  }
+
+  /* Compact Input Bar on Mobile */
+  .chat-Input {
+    padding: 6px 8px !important;
+    gap: 8px !important;
+    min-height: 54px !important;
+    height: 54px !important;
+  }
+
+  .chat-Input .button-container .head {
+    gap: 8px !important;
+  }
+
+  .chat-Input .button-container .head .emoji > svg,
+  .chat-Input .button-container .head label svg {
+    font-size: 21px !important;
+  }
+
+  .input-container {
+    padding: 4px 10px !important;
+    gap: 6px !important;
+    height: 38px !important;
+    min-width: 0 !important;
+  }
+
+  .input-container input {
+    font-size: 14px !important;
+    min-width: 0 !important;
+  }
+
+  .input-container button.submit svg {
+    font-size: 20px !important;
+  }
+}

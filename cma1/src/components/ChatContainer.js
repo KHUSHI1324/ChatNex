@@ -17,6 +17,12 @@ import TranslateIcon from '@mui/icons-material/Translate';
 import DownloadIcon from '@mui/icons-material/Download';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
+import ForwardIcon from '@mui/icons-material/Forward';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
+import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import VoiceAudioPlayer from "./VoiceAudioPlayer";
 import { LANGUAGES_LIST } from "../utils/languageList";
 import { CHATNEX_AI_BOT_ID, CHATNEX_AI_BOT, AI_STARTER_PROMPTS } from "../utils/aiBotHelper";
@@ -61,6 +67,7 @@ export default function ChatContainer({
   onLeaveGroup,
   onDeleteGroup,
   onUpdateCurrentUser,
+  onBackToChats,
   showToast,
 }) {
   const [messages, setMessages] = useState([]);
@@ -72,6 +79,12 @@ export default function ChatContainer({
   const [replyingTo, setReplyingTo] = useState(null); // { messageId, text, senderName, senderId, fileType, imgpath }
   const [editingMessage, setEditingMessage] = useState(null); // { _id, message, ... }
   const [deleteModalMessage, setDeleteModalMessage] = useState(null); // message to delete
+  const [forwardModalMessage, setForwardModalMessage] = useState(null); // message to forward
+  const [selectedForwardRecipients, setSelectedForwardRecipients] = useState([]); // recipient IDs
+  const [forwardSearchQuery, setForwardSearchQuery] = useState("");
+  const [isForwarding, setIsForwarding] = useState(false);
+  const [currentSearchMatchIndex, setCurrentSearchMatchIndex] = useState(0);
+  const [activeSearchMsgId, setActiveSearchMsgId] = useState(null);
   const [typingUsers, setTypingUsers] = useState(new Set()); // Users currently typing
   const scrollRef = useRef();
   const messagesEndRef = useRef(null);
@@ -268,6 +281,150 @@ export default function ChatContainer({
       res = res.replace(regexRemoved, '$1you');
     }
     return res;
+  };
+
+  // In-Chat Search Matching Messages List
+  const matchingMessages = React.useMemo(() => {
+    if (!searchTerm.trim() && !searchDate) return [];
+    return messages.filter((msg) => {
+      if (searchDate) {
+        const rawTime = msg.timestamp || msg.createdAt;
+        if (rawTime) {
+          const msgDate = new Date(rawTime).toISOString().slice(0, 10);
+          if (msgDate !== searchDate) return false;
+        }
+      }
+      if (searchTerm.trim()) {
+        const q = searchTerm.toLowerCase().trim();
+        const textMatch = msg.message && typeof msg.message === 'string' && msg.message.toLowerCase().includes(q);
+        const senderMatch = msg.senderName && msg.senderName.toLowerCase().includes(q);
+        const fileMatch = Array.isArray(msg.files) && msg.files.some(f => (f.filename || '').toLowerCase().includes(q));
+        if (!textMatch && !senderMatch && !fileMatch) return false;
+      }
+      return true;
+    });
+  }, [messages, searchTerm, searchDate]);
+
+  const scrollToSearchMatch = (msgId) => {
+    setActiveSearchMsgId(msgId);
+    const el = document.getElementById(`msg_${msgId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
+  useEffect(() => {
+    if (searchTerm.trim() && matchingMessages.length > 0) {
+      const target = matchingMessages[currentSearchMatchIndex] || matchingMessages[0];
+      if (target && target._id) {
+        scrollToSearchMatch(target._id);
+      }
+    } else if (!searchTerm.trim() && !searchDate) {
+      setActiveSearchMsgId(null);
+    }
+  }, [searchTerm, searchDate, currentSearchMatchIndex, matchingMessages]);
+
+  const handleNextSearchMatch = () => {
+    if (matchingMessages.length === 0) return;
+    const nextIdx = (currentSearchMatchIndex + 1) % matchingMessages.length;
+    setCurrentSearchMatchIndex(nextIdx);
+    scrollToSearchMatch(matchingMessages[nextIdx]._id);
+  };
+
+  const handlePrevSearchMatch = () => {
+    if (matchingMessages.length === 0) return;
+    const prevIdx = (currentSearchMatchIndex - 1 + matchingMessages.length) % matchingMessages.length;
+    setCurrentSearchMatchIndex(prevIdx);
+    scrollToSearchMatch(matchingMessages[prevIdx]._id);
+  };
+
+  // Forward Message Execution Handler
+  const handleExecuteForward = async () => {
+    if (!forwardModalMessage || selectedForwardRecipients.length === 0 || isForwarding) return;
+    setIsForwarding(true);
+
+    const fwdText = forwardModalMessage.message || "";
+    const fwdFiles = forwardModalMessage.files || [];
+    const fwdImgpath = forwardModalMessage.imgpath || "";
+    const timestamp = new Date().toISOString();
+
+    try {
+      for (const targetId of selectedForwardRecipients) {
+        const targetContact = contacts.find((c) => (c._id || c).toString() === targetId.toString());
+        const isGroup = Boolean(targetContact?.isGroup);
+        const memberIds = isGroup && Array.isArray(targetContact?.members)
+          ? targetContact.members.map((m) => (m._id || m).toString())
+          : [currentUser._id, targetId];
+
+        const payload = {
+          from: currentUser._id,
+          to: targetId,
+          message: fwdText,
+          files: fwdFiles,
+          imgpath: fwdImgpath,
+          isGroup: isGroup,
+          groupId: isGroup ? targetId : null,
+          voiceTranscript: forwardModalMessage.voiceTranscript || "",
+        };
+
+        const res = await axios.post(sendMessageRoute, payload);
+        const savedId = res.data?.data?._id || uuidv4();
+
+        // Broadcast socket event
+        if (socket?.current) {
+          socket.current.emit("send-msg", {
+            _id: savedId,
+            from: currentUser._id,
+            to: targetId,
+            message: fwdText,
+            files: fwdFiles,
+            imgpath: fwdImgpath,
+            isGroup: isGroup,
+            groupId: isGroup ? targetId : null,
+            members: memberIds,
+            senderName: currentUser.username,
+            senderAvatar: currentUser.avtarImage,
+            groupName: isGroup ? (targetContact.name || targetContact.username) : null,
+          });
+        }
+
+        if (onMessageSent) {
+          onMessageSent(targetId, fwdText, fwdImgpath, currentUser._id, timestamp, fwdFiles);
+        }
+
+        // If forwarding to current open chat, append to local messages state
+        if (currentChat && currentChat._id?.toString() === targetId.toString()) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              _id: savedId,
+              fromSelf: true,
+              message: fwdText,
+              files: fwdFiles,
+              imgpath: fwdImgpath,
+              reactions: [],
+              isEdited: false,
+              isDeleted: false,
+              isPinned: false,
+              read: false,
+              timestamp,
+              senderName: currentUser.username,
+              isGroup: isGroup,
+            },
+          ]);
+        }
+      }
+
+      showToast?.('success', 'Message Forwarded', `Forwarded to ${selectedForwardRecipients.length} chat(s)`);
+      setForwardModalMessage(null);
+      setSelectedForwardRecipients([]);
+      setForwardSearchQuery("");
+    } catch (err) {
+      console.error("Error forwarding message:", err);
+      showToast?.('error', 'Forward Failed', 'Failed to forward message. Please try again.');
+    } finally {
+      setIsForwarding(false);
+    }
   };
 
   const isGroupChat = Boolean(currentChat?.isGroup);
@@ -1275,13 +1432,6 @@ export default function ChatContainer({
     setHoveredMessageIndex(null);
   };
 
-  const handleSearchClick = () => {
-    setShowSearchInputBar(!showSearchInputBar); // Toggle search input bar visibility
-  };
-  const handleSearchChange = (event) => {
-    setSearchTerm(event.target.value); // Update the search term
-  };
-
   const renderMessageContent = (message) => {
     if (!message || !message.message) return null;
     if (searchTerm && searchTerm.trim() !== "") {
@@ -1838,6 +1988,28 @@ export default function ChatContainer({
           <div className="chat-container" style={{ flex: 1, minWidth: 0 }}>
             {/* Header */}
             <div className="chat-header">
+              {onBackToChats && (
+                <button
+                  type="button"
+                  className="mobile-back-btn"
+                  onClick={onBackToChats}
+                  title="Back to chats"
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#00a884",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "4px",
+                    marginRight: "4px",
+                  }}
+                >
+                  <ArrowBackIcon style={{ fontSize: "22px" }} />
+                </button>
+              )}
+
               <div
                 className="user-details"
                 onClick={() => !isAiChat && setShowInfoDrawer(!showInfoDrawer)}
@@ -2090,7 +2262,7 @@ export default function ChatContainer({
                   </div>
                 )}
 
-                {/* Search in Chat Section: Search Icon + Search Input & Date Picker right next to it */}
+                {/* Search in Chat Section: Search Icon + Search Input with Match Counter & Navigation */}
                 <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                   <div
                     className="search"
@@ -2101,6 +2273,7 @@ export default function ChatContainer({
                       if (!nextState) {
                         setSearchTerm("");
                         setSearchDate("");
+                        setActiveSearchMsgId(null);
                       }
                     }}
                     style={{
@@ -2129,19 +2302,83 @@ export default function ChatContainer({
                     >
                       <input
                         type="text"
-                        placeholder="Search..."
+                        placeholder="Search in chat..."
                         value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
+                        onChange={(e) => {
+                          setSearchTerm(e.target.value);
+                          setCurrentSearchMatchIndex(0);
+                        }}
                         style={{
                           backgroundColor: "transparent",
                           color: "#e9edef",
                           border: "none",
                           outline: "none",
                           fontSize: "12.5px",
-                          width: "105px",
+                          width: "120px",
                         }}
                         autoFocus
                       />
+
+                      {/* Match Count Indicator */}
+                      {searchTerm.trim() && (
+                        <span
+                          style={{
+                            fontSize: "11px",
+                            color: matchingMessages.length > 0 ? "#00a884" : "#f15c6d",
+                            fontWeight: "600",
+                            whiteSpace: "nowrap",
+                            padding: "0 2px",
+                          }}
+                        >
+                          {matchingMessages.length > 0
+                            ? `${currentSearchMatchIndex + 1}/${matchingMessages.length}`
+                            : "0 found"}
+                        </span>
+                      )}
+
+                      {/* Navigation Arrows */}
+                      {matchingMessages.length > 1 && (
+                        <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+                          <button
+                            type="button"
+                            onClick={handlePrevSearchMatch}
+                            title="Previous match"
+                            style={{
+                              background: "none",
+                              border: "none",
+                              color: "#8696a0",
+                              cursor: "pointer",
+                              padding: "2px",
+                              display: "flex",
+                              alignItems: "center",
+                              borderRadius: "4px",
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.color = "#00a884")}
+                            onMouseLeave={(e) => (e.currentTarget.style.color = "#8696a0")}
+                          >
+                            <ArrowUpwardIcon style={{ fontSize: "15px" }} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleNextSearchMatch}
+                            title="Next match"
+                            style={{
+                              background: "none",
+                              border: "none",
+                              color: "#8696a0",
+                              cursor: "pointer",
+                              padding: "2px",
+                              display: "flex",
+                              alignItems: "center",
+                              borderRadius: "4px",
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.color = "#00a884")}
+                            onMouseLeave={(e) => (e.currentTarget.style.color = "#8696a0")}
+                          >
+                            <ArrowDownwardIcon style={{ fontSize: "15px" }} />
+                          </button>
+                        </div>
+                      )}
 
                       {/* Date Picker Input */}
                       <input
@@ -2168,6 +2405,7 @@ export default function ChatContainer({
                           onClick={() => {
                             setSearchTerm("");
                             setSearchDate("");
+                            setActiveSearchMsgId(null);
                           }}
                           titleAccess="Clear search"
                         />
@@ -2425,42 +2663,11 @@ export default function ChatContainer({
                 </div>
               )}
 
-              {(() => {
-                const filteredMessages = messages.filter((msg) => {
-                  if (!searchTerm.trim() && !searchDate) return true;
-
-                  if (searchDate) {
-                    const rawTime = msg.timestamp || msg.createdAt;
-                    if (rawTime) {
-                      const msgDate = new Date(rawTime).toISOString().slice(0, 10);
-                      if (msgDate !== searchDate) return false;
-                    }
-                  }
-
-                  if (searchTerm.trim()) {
-                    const q = searchTerm.toLowerCase().trim();
-                    const textMatch = msg.message && typeof msg.message === 'string' && msg.message.toLowerCase().includes(q);
-                    const senderMatch = msg.senderName && msg.senderName.toLowerCase().includes(q);
-                    const fileMatch = Array.isArray(msg.files) && msg.files.some(f => (f.filename || '').toLowerCase().includes(q));
-                    if (!textMatch && !senderMatch && !fileMatch) return false;
-                  }
-
-                  return true;
-                });
-
-                if ((searchTerm.trim() || searchDate) && filteredMessages.length === 0) {
-                  return (
-                    <div style={{ textAlign: "center", padding: "50px 20px", color: "#8696a0", fontSize: "14px" }}>
-                      🔍 No messages found matching {searchTerm ? `"${searchTerm}"` : ""} {searchDate ? `on date ${searchDate}` : ""}.
-                    </div>
-                  );
-                }
-
-                return filteredMessages.map((message, index) => {
-                  const messageFiles = message.files && message.files.length > 0 ? message.files : (message.imgpath ? [{ url: message.imgpath, filename: message.imgpath.split("/").pop(), fileType: "image" }] : []);
-                  const emojiOnlyInfo = getEmojiOnlyInfo(message.message, messageFiles.length > 0);
-                  const showDay = index === 0 || getDay(message.timestamp) !== getDay(filteredMessages[index - 1]?.timestamp);
-                  const isGroupMsg = currentChat.isGroup || message.isGroup;
+              {messages.map((message, index) => {
+                const messageFiles = message.files && message.files.length > 0 ? message.files : (message.imgpath ? [{ url: message.imgpath, filename: message.imgpath.split("/").pop(), fileType: "image" }] : []);
+                const emojiOnlyInfo = getEmojiOnlyInfo(message.message, messageFiles.length > 0);
+                const showDay = index === 0 || getDay(message.timestamp) !== getDay(messages[index - 1]?.timestamp);
+                const isGroupMsg = currentChat.isGroup || message.isGroup;
 
                 const isSystemMsg = Boolean(message.isSystem) || (
                   typeof message.message === 'string' &&
@@ -2636,6 +2843,21 @@ export default function ChatContainer({
                                 title="Reply"
                               >
                                 <ReplyIcon style={{ fontSize: "16px" }} />
+                              </button>
+
+                              {/* Forward Button */}
+                              <button
+                                type="button"
+                                className="action-icon-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setForwardModalMessage(message);
+                                  setSelectedForwardRecipients([]);
+                                  setForwardSearchQuery("");
+                                }}
+                                title="Forward message"
+                              >
+                                <ForwardIcon style={{ fontSize: "16px", transform: "scaleX(-1)" }} />
                               </button>
 
                               {/* Star Button */}
@@ -3165,8 +3387,7 @@ export default function ChatContainer({
                     </div>
                   </React.Fragment>
                 );
-              });
-            })()}
+              })}
 
               {/* Typing Bubble */}
               {typingUsers.size > 0 && (
@@ -3661,6 +3882,236 @@ export default function ChatContainer({
                     );
                   })
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Forward Message Modal Dialog */}
+          {forwardModalMessage && (
+            <div
+              style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.75)',
+                zIndex: 99999,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                animation: 'fadeIn 0.2s ease-out',
+              }}
+              onClick={() => setForwardModalMessage(null)}
+            >
+              <div
+                style={{
+                  backgroundColor: '#202c33',
+                  borderRadius: '12px',
+                  width: '420px',
+                  maxWidth: '92vw',
+                  height: '520px',
+                  maxHeight: '90vh',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  boxShadow: '0 12px 36px rgba(0, 0, 0, 0.7)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  overflow: 'hidden',
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Modal Header */}
+                <div
+                  style={{
+                    padding: '16px 20px',
+                    backgroundColor: '#111b21',
+                    borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <ForwardIcon style={{ color: '#00a884', fontSize: '22px', transform: 'scaleX(-1)' }} />
+                    <h3 style={{ margin: 0, color: '#e9edef', fontSize: '16px', fontWeight: '600' }}>
+                      Forward message to...
+                    </h3>
+                  </div>
+                  <CloseIcon
+                    style={{ color: '#8696a0', cursor: 'pointer', fontSize: '20px' }}
+                    onClick={() => setForwardModalMessage(null)}
+                  />
+                </div>
+
+                {/* Message Preview Snippet */}
+                <div
+                  style={{
+                    padding: '10px 16px',
+                    backgroundColor: 'rgba(0, 168, 132, 0.1)',
+                    borderBottom: '1px solid rgba(0, 168, 132, 0.2)',
+                    fontSize: '12.5px',
+                    color: '#e9edef',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                  }}
+                >
+                  <span style={{ color: '#00a884', fontWeight: '600' }}>Preview:</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#8696a0' }}>
+                    {forwardModalMessage.message || (forwardModalMessage.files?.length > 0 ? `📎 ${forwardModalMessage.files.length} attachment(s)` : 'Photo')}
+                  </span>
+                </div>
+
+                {/* Search Bar */}
+                <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      backgroundColor: '#111b21',
+                      borderRadius: '8px',
+                      padding: '8px 12px',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                    }}
+                  >
+                    <span style={{ fontSize: '13px', color: '#8696a0', marginRight: '8px' }}>🔍</span>
+                    <input
+                      type="text"
+                      placeholder="Search contacts or groups..."
+                      value={forwardSearchQuery}
+                      onChange={(e) => setForwardSearchQuery(e.target.value)}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        outline: 'none',
+                        color: '#e9edef',
+                        fontSize: '13px',
+                        width: '100%',
+                      }}
+                      autoFocus
+                    />
+                  </div>
+                </div>
+
+                {/* Recipients List */}
+                <div
+                  className="chatnex-custom-scrollbar"
+                  style={{ flex: 1, overflowY: 'auto', padding: '6px 10px' }}
+                >
+                  {contacts
+                    .filter((c) => {
+                      if (!forwardSearchQuery.trim()) return true;
+                      const q = forwardSearchQuery.toLowerCase();
+                      return (c.username || c.name || '').toLowerCase().includes(q);
+                    })
+                    .map((item) => {
+                      const id = (item._id || item).toString();
+                      const isSelected = selectedForwardRecipients.includes(id);
+                      return (
+                        <div
+                          key={id}
+                          onClick={() => {
+                            setSelectedForwardRecipients((prev) =>
+                              prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+                            );
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '10px 12px',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            backgroundColor: isSelected ? 'rgba(0, 168, 132, 0.15)' : 'transparent',
+                            transition: 'background 0.15s',
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!isSelected) e.currentTarget.style.backgroundColor = '#182229';
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent';
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <img
+                              src={getAvatarSrc(item.avtarImage || item.groupImage)}
+                              alt={item.username || item.name}
+                              style={{ width: '38px', height: '38px', borderRadius: '50%' }}
+                            />
+                            <div>
+                              <div style={{ color: '#e9edef', fontSize: '13.5px', fontWeight: '500' }}>
+                                {item.name || item.username}
+                              </div>
+                              <div style={{ color: '#8696a0', fontSize: '11px' }}>
+                                {item.isGroup ? 'Group Chat' : 'Contact'}
+                              </div>
+                            </div>
+                          </div>
+                          <div>
+                            {isSelected ? (
+                              <CheckCircleIcon style={{ color: '#00a884', fontSize: '20px' }} />
+                            ) : (
+                              <RadioButtonUncheckedIcon style={{ color: '#8696a0', fontSize: '20px' }} />
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+
+                {/* Modal Footer */}
+                <div
+                  style={{
+                    padding: '12px 20px',
+                    backgroundColor: '#111b21',
+                    borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <span style={{ fontSize: '12.5px', color: '#8696a0' }}>
+                    {selectedForwardRecipients.length} selected
+                  </span>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setForwardModalMessage(null)}
+                      style={{
+                        backgroundColor: 'transparent',
+                        border: '1px solid rgba(255, 255, 255, 0.15)',
+                        color: '#e9edef',
+                        padding: '8px 14px',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontSize: '13px',
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={selectedForwardRecipients.length === 0 || isForwarding}
+                      onClick={handleExecuteForward}
+                      style={{
+                        backgroundColor: selectedForwardRecipients.length > 0 ? '#00a884' : '#202c33',
+                        color: selectedForwardRecipients.length > 0 ? '#fff' : '#8696a0',
+                        border: 'none',
+                        padding: '8px 18px',
+                        borderRadius: '6px',
+                        cursor: selectedForwardRecipients.length > 0 ? 'pointer' : 'not-allowed',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <ForwardIcon style={{ fontSize: '16px', transform: 'scaleX(-1)' }} />
+                      {isForwarding ? 'Forwarding...' : `Forward (${selectedForwardRecipients.length})`}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           )}
