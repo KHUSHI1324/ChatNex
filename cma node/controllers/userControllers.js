@@ -168,7 +168,9 @@ module.exports.getContactsWithLastMessage = async (req, res, next) => {
                                 $expr: {
                                     $and: [
                                         { $in: [currentUserIdStr, "$users"] },
-                                        { $in: ["$$contactIdStr", "$users"] }
+                                        { $in: ["$$contactIdStr", "$users"] },
+                                        { $ne: ["$isGroup", true] },
+                                        { $eq: [{ $ifNull: ["$groupId", null] }, null] }
                                     ]
                                 }
                             }
@@ -191,7 +193,9 @@ module.exports.getContactsWithLastMessage = async (req, res, next) => {
                                         { $in: [currentUserIdStr, "$users"] },
                                         { $in: ["$$contactIdStr", "$users"] },
                                         { $eq: ["$sender", "$$contactObjId"] },
-                                        { $eq: ["$read", false] }
+                                        { $eq: ["$read", false] },
+                                        { $ne: ["$isGroup", true] },
+                                        { $eq: [{ $ifNull: ["$groupId", null] }, null] }
                                     ]
                                 }
                             }
