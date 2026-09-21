@@ -14,10 +14,14 @@ const DEFAULT_GROUP_SVG = Buffer.from(
   </svg>`
 ).toString("base64");
 
-// Helper to check if a user is a group admin
+// Helper to check if a user is an active group admin
 const isGroupAdmin = (group, userId) => {
   if (!group || !userId) return false;
   const uStr = (userId._id || userId).toString();
+  // An admin MUST be an active member currently in group.members
+  const isMember = (group.members || []).some((m) => (m._id || m).toString() === uStr);
+  if (!isMember) return false;
+
   if (group.admin && (group.admin._id || group.admin).toString() === uStr) return true;
   if (Array.isArray(group.admins)) {
     return group.admins.some((a) => (a._id || a).toString() === uStr);
@@ -243,9 +247,10 @@ exports.addMembers = async (req, res, next) => {
       return res.status(404).json({ status: false, msg: "Group not found" });
     }
 
-    // Check if addedBy is an admin of this group
-    if (!isGroupAdmin(group, addedBy)) {
-      return res.status(403).json({ status: false, msg: "Only group admins can add new members" });
+    // Check if addedBy is currently an active member AND an admin of this group
+    const isMember = (group.members || []).some((m) => m.toString() === addedBy.toString());
+    if (!isMember || !isGroupAdmin(group, addedBy)) {
+      return res.status(403).json({ status: false, msg: "Only active group admins can add new members" });
     }
 
     const addedByUser = addedBy ? await User.findById(addedBy) : null;
@@ -772,11 +777,14 @@ exports.leaveGroup = async (req, res, next) => {
     pastMemberSet.add(userIdStr);
     group.pastMembers = Array.from(pastMemberSet).map((id) => new mongoose.Types.ObjectId(id));
 
-    // If no admins left and members exist, assign first member as admin
-    if ((!group.admins || group.admins.length === 0) && remainingMembers.length > 0) {
+    // If leaving user was admin, reassign or clear
+    if (remainingMembers.length === 0) {
+      group.admin = null;
+      group.admins = [];
+    } else if (!group.admins || group.admins.length === 0) {
       group.admins = [remainingMembers[0]];
       group.admin = remainingMembers[0];
-    } else if (group.admin && group.admin.toString() === userIdStr && remainingMembers.length > 0) {
+    } else if (group.admin && group.admin.toString() === userIdStr) {
       group.admin = group.admins && group.admins.length > 0 ? group.admins[0] : remainingMembers[0];
     }
 

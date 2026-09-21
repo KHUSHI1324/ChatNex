@@ -432,10 +432,7 @@ export default function ChatContainer({
   const isCurrentMember = isGroupChat ? (
     (currentChat.members || []).some(
       (m) => (m._id || m).toString() === (currentUser?._id || '').toString()
-    ) ||
-    (currentChat.admin?._id || currentChat.admin || '').toString() === (currentUser?._id || '').toString() ||
-    (Array.isArray(currentChat.admins) &&
-      currentChat.admins.some((a) => (a?._id || a || '').toString() === (currentUser?._id || '').toString()))
+    ) && currentChat.isCurrentMember !== false
   ) : true;
 
   const [isContactBlockedByThem, setIsContactBlockedByThem] = useState(false);
@@ -1631,7 +1628,7 @@ export default function ChatContainer({
 
     const getFileUrl = (url) => {
       if (!url) return "";
-      return url.startsWith("http://") || url.startsWith("https://") ? url : `${host}/${url}`;
+      return url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:") || url.startsWith("blob:") ? url : `${host}/${url}`;
     };
 
     const audios = messageFiles.filter(

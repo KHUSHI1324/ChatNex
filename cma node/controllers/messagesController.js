@@ -57,6 +57,13 @@ exports.addMessage = async (req, res, next) => {
       groupRefId = groupId || to;
       const groupDoc = await Group.findById(groupRefId);
       if (groupDoc) {
+        const isMember = (groupDoc.members || []).some((m) => m.toString() === from.toString());
+        if (!isMember) {
+          return res.status(403).json({
+            status: false,
+            msg: "You can't send messages to this group because you're no longer a participant.",
+          });
+        }
         usersList = groupDoc.members.map((m) => m.toString());
       }
     }
@@ -466,9 +473,17 @@ exports.uploadMedia = async (req, res, next) => {
 
   try {
     const formattedFiles = rawFiles.map((file) => {
-      const normalizedPath = file.path.replace(/\\/g, "/");
+      let fileUrl = "";
+      if (file.buffer) {
+        fileUrl = `data:${file.mimetype || "application/octet-stream"};base64,${file.buffer.toString("base64")}`;
+      } else if (file.path) {
+        fileUrl = file.path.replace(/\\/g, "/");
+      } else if (file.filename) {
+        fileUrl = `uploads/${file.filename}`;
+      }
+
       return {
-        url: normalizedPath,
+        url: fileUrl,
         filename: file.originalname,
         fileType: getFileType(file.mimetype, file.originalname),
         mimeType: file.mimetype,
@@ -487,6 +502,13 @@ exports.uploadMedia = async (req, res, next) => {
       groupRefId = groupId || to;
       const groupDoc = await Group.findById(groupRefId);
       if (groupDoc) {
+        const isMember = (groupDoc.members || []).some((m) => m.toString() === from.toString());
+        if (!isMember) {
+          return res.status(403).json({
+            status: 403,
+            error: "You can't send files to this group because you're no longer a participant.",
+          });
+        }
         usersList = groupDoc.members.map((m) => m.toString());
       }
     }

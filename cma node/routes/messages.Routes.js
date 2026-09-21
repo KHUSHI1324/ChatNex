@@ -60,16 +60,8 @@ const ALLOWED_EXTENSIONS = new Set([
   "pdf", "doc", "docx", "xls", "xlsx", "csv"
 ]);
 
-// File storage path with sanitized naming
-const storage = multer.diskStorage({
-  destination: (req, file, callback) => {
-    callback(null, "./uploads");
-  },
-  filename: (req, file, callback) => {
-    const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
-    callback(null, `file-${Date.now()}-${safeName}`);
-  },
-});
+// In-memory file storage compatible with Vercel Serverless and traditional hosting
+const storage = multer.memoryStorage();
 
 // File filter accepting images, videos, PDF, DOC/DOCX, XLS/XLSX, CSV
 const fileFilter = (req, file, callback) => {

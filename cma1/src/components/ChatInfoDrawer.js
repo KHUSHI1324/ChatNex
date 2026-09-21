@@ -239,17 +239,18 @@ export default function ChatInfoDrawer({
 
   const isGroup = Boolean(chat?.isGroup);
   const members = chat?.members || [];
-  const adminId = (chat?.admin?._id || chat?.admin || '').toString();
   const currentUserIdStr = (currentUser?._id || '').toString();
-  const isCurrentUserAdmin =
+  const isMember = members.some((m) => (m._id || m).toString() === currentUserIdStr);
+  const isCurrentMember = isGroup ? (
+    isMember && chat?.isCurrentMember !== false
+  ) : true;
+
+  const adminId = (chat?.admin?._id || chat?.admin || '').toString();
+  const isCurrentUserAdmin = isCurrentMember && (
     adminId === currentUserIdStr ||
     (Array.isArray(chat?.admins) &&
-      chat.admins.some((a) => (a?._id || a || '').toString() === currentUserIdStr));
-
-  const isCurrentMember = isGroup ? (
-    members.some((m) => (m._id || m).toString() === currentUserIdStr) ||
-    isCurrentUserAdmin
-  ) : true;
+      chat.admins.some((a) => (a?._id || a || '').toString() === currentUserIdStr))
+  );
 
   // Can edit group name/description/avatar: only admin, OR if permission is 'everyone'
   const canEditGroupInfo = isGroup && isCurrentMember && (
@@ -835,29 +836,33 @@ export default function ChatInfoDrawer({
 
             {/* Quick Action Buttons: Audio, Video, Add, Search */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
-              <div
-                className="chatnex-drawer-btn"
-                onClick={() => onStartCall && onStartCall(chat, 'audio')}
-                title="Voice call"
-              >
-                <div className="btn-circle">
-                  <CallIcon style={{ fontSize: '20px' }} />
-                </div>
-                <span style={{ color: '#00a884', fontSize: '12px', fontWeight: '500' }}>Audio</span>
-              </div>
+              {(!isGroup || isCurrentMember) && (
+                <>
+                  <div
+                    className="chatnex-drawer-btn"
+                    onClick={() => onStartCall && onStartCall(chat, 'audio')}
+                    title="Voice call"
+                  >
+                    <div className="btn-circle">
+                      <CallIcon style={{ fontSize: '20px' }} />
+                    </div>
+                    <span style={{ color: '#00a884', fontSize: '12px', fontWeight: '500' }}>Audio</span>
+                  </div>
 
-              <div
-                className="chatnex-drawer-btn"
-                onClick={() => onStartCall && onStartCall(chat, 'video')}
-                title="Video call"
-              >
-                <div className="btn-circle">
-                  <VideoCallIcon style={{ fontSize: '22px' }} />
-                </div>
-                <span style={{ color: '#00a884', fontSize: '12px', fontWeight: '500' }}>Video</span>
-              </div>
+                  <div
+                    className="chatnex-drawer-btn"
+                    onClick={() => onStartCall && onStartCall(chat, 'video')}
+                    title="Video call"
+                  >
+                    <div className="btn-circle">
+                      <VideoCallIcon style={{ fontSize: '22px' }} />
+                    </div>
+                    <span style={{ color: '#00a884', fontSize: '12px', fontWeight: '500' }}>Video</span>
+                  </div>
+                </>
+              )}
 
-              {isGroup && (
+              {isGroup && isCurrentUserAdmin && isCurrentMember && (
                 <div
                   className="chatnex-drawer-btn"
                   onClick={() => setShowAddMemberModal(true)}

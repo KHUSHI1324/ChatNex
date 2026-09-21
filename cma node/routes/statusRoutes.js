@@ -8,15 +8,7 @@ const {
   deleteStatus,
 } = require('../controllers/statusController');
 
-const storage = multer.diskStorage({
-  destination: (req, file, callback) => {
-    callback(null, './uploads');
-  },
-  filename: (req, file, callback) => {
-    const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
-    callback(null, `status-${Date.now()}-${safeName}`);
-  },
-});
+const storage = multer.memoryStorage();
 
 const upload = multer({
   storage: storage,

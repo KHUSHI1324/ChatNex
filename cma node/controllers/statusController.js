@@ -13,7 +13,11 @@ module.exports.createStatus = async (req, res, next) => {
     let finalMediaType = mediaType || 'text';
 
     if (req.file) {
-      finalMediaUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+      if (req.file.buffer) {
+        finalMediaUrl = `data:${req.file.mimetype || 'image/jpeg'};base64,${req.file.buffer.toString('base64')}`;
+      } else if (req.file.filename) {
+        finalMediaUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+      }
       const mime = req.file.mimetype || '';
       if (mime.startsWith('image/')) finalMediaType = 'image';
       else if (mime.startsWith('video/')) finalMediaType = 'video';
