@@ -61,4 +61,10 @@ const groupSchema = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.models.Group || mongoose.model("Group", groupSchema);
+const GroupModel = mongoose.models.Group || mongoose.model("Group", groupSchema);
+
+if (!mongoose.models.groups) {
+  mongoose.model("groups", groupSchema);
+}
+
+module.exports = GroupModel;

@@ -18,7 +18,7 @@ const callSchema = new mongoose.Schema(
     },
     groupId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "groups",
+      ref: "Group",
       default: null,
     },
     participants: [

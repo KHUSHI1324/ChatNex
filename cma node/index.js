@@ -13,6 +13,7 @@ require("./models/userModels");
 require("./models/groupModel");
 require("./models/messageModel");
 require("./models/callModel");
+require("./models/statusModel");
 
 const userRoutes = require("./routes/userRoutes");
 const messageRoute = require("./routes/messages.Routes");
