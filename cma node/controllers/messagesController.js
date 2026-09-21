@@ -317,6 +317,7 @@ exports.getAllMessage = async (req, res, next) => {
       .find(query)
       .populate("sender", "username avtarImage email _id")
       .populate("pinnedBy", "username _id")
+      .populate("reactions.userId", "username avtarImage email _id")
       .sort({ createdAt: 1 });
 
     const projectedMessages = messages
@@ -355,7 +356,16 @@ exports.getAllMessage = async (req, res, next) => {
           files: files,
           voiceTranscript: msg.message?.voiceTranscript || (files[0]?.voiceTranscript || ""),
           replyTo: msg.replyTo || null,
-          reactions: msg.reactions || [],
+          reactions: (msg.reactions || []).map((r) => {
+            const rUser = r.userId && typeof r.userId === "object" ? r.userId : null;
+            const uid = rUser ? (rUser._id || "").toString() : (r.userId || r.user || "").toString();
+            return {
+              userId: uid,
+              username: rUser?.username || r.username || (uid === from ? "You" : "User"),
+              userAvatar: rUser?.avtarImage || "",
+              emoji: r.emoji,
+            };
+          }),
           isEdited: Boolean(msg.isEdited),
           isDeleted: Boolean(msg.isDeleted),
           isPinned: Boolean(msg.isPinned),
@@ -640,7 +650,7 @@ exports.reactToMessage = async (req, res, next) => {
 
     const userIdStr = userId.toString();
     const existingIndex = (msg.reactions || []).findIndex(
-      (r) => (r.userId || r.user || "").toString() === userIdStr
+      (r) => ((r.userId?._id || r.userId || r.user || "")).toString() === userIdStr
     );
 
     if (existingIndex > -1) {
@@ -662,7 +672,23 @@ exports.reactToMessage = async (req, res, next) => {
     }
 
     await msg.save();
-    return res.json({ status: true, messageId, reactions: msg.reactions });
+
+    const populatedMsg = await messageModel
+      .findById(messageId)
+      .populate("reactions.userId", "username avtarImage email _id");
+
+    const formattedReactions = (populatedMsg.reactions || []).map((r) => {
+      const rUser = r.userId && typeof r.userId === "object" ? r.userId : null;
+      const uid = rUser ? (rUser._id || "").toString() : (r.userId || r.user || "").toString();
+      return {
+        userId: uid,
+        username: rUser?.username || r.username || (uid === userIdStr ? "You" : "User"),
+        userAvatar: rUser?.avtarImage || "",
+        emoji: r.emoji,
+      };
+    });
+
+    return res.json({ status: true, messageId, reactions: formattedReactions });
   } catch (error) {
     next(error);
   }

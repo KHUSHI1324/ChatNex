@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import Profile from './Profile';
 import Search from './Search';
+import AddContactModal from './AddContactModal';
 import GroupsIcon from '@mui/icons-material/Groups';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
 import { getAvatarSrc } from '../utils/avatarHelper';
 import { CHATNEX_AI_BOT, CHATNEX_AI_BOT_ID } from '../utils/aiBotHelper';
 
@@ -16,12 +18,15 @@ export default function Contacts({
   loading = false,
   error = null,
   onRetry,
+  onContactAdded,
 }) {
   const [currentUserName, setCurrentUserName] = useState(undefined);
   const [currentUserImage, setCurrentUserImage] = useState(undefined);
   const [currentSelected, setCurrentSelected] = useState(undefined);
   const [currentEmail, setCurrentEmail] = useState(undefined);
   const [latestMessages, setLatestMessages] = useState({}); // Store latest messages
+  const [isAddContactOpen, setIsAddContactOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Function to format timestamps
   const formatTimestamp = (timestamp) => {
@@ -98,6 +103,14 @@ export default function Contacts({
 
   const isAiSelected = currentSelected === CHATNEX_AI_BOT_ID;
 
+  const cleanQuery = (searchQuery || '').trim().toLowerCase();
+  const displayedContacts = cleanQuery === ''
+    ? (contacts || [])
+    : (contacts || []).filter((contact) => {
+        const name = (contact.username || contact.name || '').toLowerCase();
+        return name.includes(cleanQuery);
+      });
+
   return (
     <div
       className='contacts-panel'
@@ -108,15 +121,16 @@ export default function Contacts({
         width: '100%',
         backgroundColor: '#111b21',
         overflow: 'hidden',
+        position: 'relative',
       }}
     >
       {/* Chats Header */}
       <div
         className='contacts-header'
         style={{
-          padding: '14px 16px 2px 16px',
+          padding: '14px 16px 6px 16px',
           display: 'flex',
-          alignItems: 'flex-start',
+          alignItems: 'center',
           justifyContent: 'space-between',
           backgroundColor: '#111b21',
           boxSizing: 'border-box',
@@ -126,14 +140,49 @@ export default function Contacts({
           <span style={{ color: '#00a884', fontWeight: '800', fontSize: '20px', letterSpacing: '-0.01em', lineHeight: '1.1' }}>
             ChatNex
           </span>
-          <span style={{ color: '#8696a0', fontSize: '17px', fontWeight: '600', letterSpacing: '0.2px', marginTop: '2px', lineHeight: '1.2' }}>
+          <span style={{ color: '#8696a0', fontSize: '15px', fontWeight: '600', letterSpacing: '0.2px', marginTop: '2px', lineHeight: '1.2' }}>
             Chats
           </span>
         </div>
+
+        {/* Telegram-Style Add Contact Button */}
+        <button
+          type="button"
+          onClick={() => setIsAddContactOpen(true)}
+          title="Add Contact / New Chat"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            backgroundColor: 'rgba(0, 168, 132, 0.15)',
+            color: '#00a884',
+            border: '1px solid rgba(0, 168, 132, 0.3)',
+            borderRadius: '20px',
+            padding: '6px 12px',
+            fontSize: '12.5px',
+            fontWeight: '600',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = '#00a884';
+            e.currentTarget.style.color = '#111b21';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'rgba(0, 168, 132, 0.15)';
+            e.currentTarget.style.color = '#00a884';
+          }}
+        >
+          <PersonAddAlt1Icon style={{ fontSize: '16px' }} />
+          <span>New Contact</span>
+        </button>
       </div>
 
-      {/* WhatsApp Search Input */}
-      <Search />
+      {/* WhatsApp Search Input (Filters the list below in-place) */}
+      <Search
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+      />
 
       {/* Scrollable Contacts / Chats List */}
       <div
@@ -360,8 +409,8 @@ export default function Contacts({
               </button>
             )}
           </div>
-        ) : contacts && contacts.length > 0 ? (
-          contacts.map((contact, index) => {
+        ) : displayedContacts && displayedContacts.length > 0 ? (
+          displayedContacts.map((contact, index) => {
             const isSelected = contact._id === currentSelected;
             const unread = (contact.unreadCount || 0) + (unreadMessages?.[contact._id] || 0);
             const latest = latestMessages[contact._id];
@@ -519,10 +568,25 @@ export default function Contacts({
           })
         ) : (
           <div style={{ padding: '24px 16px', textAlign: 'center', color: '#8696a0', fontSize: '13px' }}>
-            No contacts available
+            {cleanQuery ? `No chats or groups found matching "${searchQuery}"` : "No contacts available"}
           </div>
         )}
       </div>
+
+      {/* Telegram-style Add Contact / New Chat Modal */}
+      <AddContactModal
+        isOpen={isAddContactOpen}
+        onClose={() => setIsAddContactOpen(false)}
+        currentUser={currentUser}
+        contacts={contacts}
+        onContactAdded={(user) => {
+          if (onContactAdded) {
+            onContactAdded(user);
+          } else {
+            changeCurrentChat(null, user);
+          }
+        }}
+      />
     </div>
   );
 }

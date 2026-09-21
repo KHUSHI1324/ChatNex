@@ -17,16 +17,19 @@ import TranslateIcon from '@mui/icons-material/Translate';
 import DownloadIcon from '@mui/icons-material/Download';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
-import ForwardIcon from '@mui/icons-material/Forward';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
+import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
+import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
+import GroupsIcon from '@mui/icons-material/Groups';
 import VoiceAudioPlayer from "./VoiceAudioPlayer";
 import { LANGUAGES_LIST } from "../utils/languageList";
 import { CHATNEX_AI_BOT_ID, CHATNEX_AI_BOT, AI_STARTER_PROMPTS } from "../utils/aiBotHelper";
 import ReactMarkdown from "react-markdown";
+import { getAvatarSrc } from "../utils/avatarHelper";
 import {
   sendMessageRoute,
   getAllMessagesRoute,
@@ -44,7 +47,6 @@ import {
   unblockUserRoute,
   host,
 } from "../utils/APIRoutes";
-import { getAvatarSrc } from "../utils/avatarHelper";
 import { v4 as uuidv4 } from "uuid";
 
 export default function ChatContainer({
@@ -80,6 +82,8 @@ export default function ChatContainer({
   const [editingMessage, setEditingMessage] = useState(null); // { _id, message, ... }
   const [deleteModalMessage, setDeleteModalMessage] = useState(null); // message to delete
   const [forwardModalMessage, setForwardModalMessage] = useState(null); // message to forward
+  const [reactionsModalMsg, setReactionsModalMsg] = useState(null); // message to view WhatsApp reactions
+  const [reactionActiveTab, setReactionActiveTab] = useState("all"); // active tab in reactions modal
   const [selectedForwardRecipients, setSelectedForwardRecipients] = useState([]); // recipient IDs
   const [forwardSearchQuery, setForwardSearchQuery] = useState("");
   const [isForwarding, setIsForwarding] = useState(false);
@@ -104,6 +108,31 @@ export default function ChatContainer({
   const [activeWallpaper, setActiveWallpaper] = useState(
     localStorage.getItem(`chatnex_wallpaper_${currentUser?._id}`) || 'default'
   );
+  const [lightboxData, setLightboxData] = useState(null); // { isOpen: boolean, images: [{ url, filename }], currentIndex: number }
+
+  // Keyboard navigation & escape listener for in-app image lightbox
+  useEffect(() => {
+    if (!lightboxData || !lightboxData.isOpen) return;
+
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") {
+        setLightboxData(null);
+      } else if (e.key === "ArrowLeft" && lightboxData.images.length > 1) {
+        setLightboxData((prev) => ({
+          ...prev,
+          currentIndex: (prev.currentIndex - 1 + prev.images.length) % prev.images.length,
+        }));
+      } else if (e.key === "ArrowRight" && lightboxData.images.length > 1) {
+        setLightboxData((prev) => ({
+          ...prev,
+          currentIndex: (prev.currentIndex + 1) % prev.images.length,
+        }));
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [lightboxData]);
 
   useEffect(() => {
     const handleWpChange = () => {
@@ -415,10 +444,18 @@ export default function ChatContainer({
         }
       }
 
+      const firstTargetId = selectedForwardRecipients[0];
+      const targetContact = contacts.find((c) => (c._id || c).toString() === firstTargetId?.toString());
+
       showToast?.('success', 'Message Forwarded', `Forwarded to ${selectedForwardRecipients.length} chat(s)`);
       setForwardModalMessage(null);
       setSelectedForwardRecipients([]);
       setForwardSearchQuery("");
+
+      // Automatically switch view to the forwarded chat
+      if (targetContact && onOpenDirectChat) {
+        onOpenDirectChat(targetContact);
+      }
     } catch (err) {
       console.error("Error forwarding message:", err);
       showToast?.('error', 'Forward Failed', 'Failed to forward message. Please try again.');
@@ -559,6 +596,13 @@ export default function ChatContainer({
           setMessages((prev) =>
             prev.map((m) => (m._id === messageId ? { ...m, reactions } : m))
           );
+          setReactionsModalMsg((prev) => {
+            if (prev?._id === messageId) {
+              if (!reactions || reactions.length === 0) return null;
+              return { ...prev, reactions };
+            }
+            return prev;
+          });
         }
       };
 
@@ -1139,6 +1183,14 @@ export default function ChatContainer({
           prev.map((m) => (m._id === message._id ? { ...m, reactions: updatedReactions } : m))
         );
 
+        setReactionsModalMsg((prev) => {
+          if (prev?._id === message._id) {
+            if (!updatedReactions || updatedReactions.length === 0) return null;
+            return { ...prev, reactions: updatedReactions };
+          }
+          return prev;
+        });
+
         if (socket?.current) {
           const memberIds = isGroupChat && currentChat.members
             ? currentChat.members.map((m) => (m._id || m).toString())
@@ -1369,16 +1421,31 @@ export default function ChatContainer({
   };
 
   const scrollToMessage = (messageId) => {
+    if (!messageId) return;
     const el = document.getElementById(`msg_${messageId}`);
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      el.style.transition = 'background 0.3s ease';
 
-      const originalBg = el.style.backgroundColor;
-      el.style.backgroundColor = 'rgba(0, 168, 132, 0.25)';
+      const contentEl = el.querySelector('.content') || el;
+      const originalBg = contentEl.style.backgroundColor;
+      const originalBoxShadow = contentEl.style.boxShadow;
+      const originalTransform = contentEl.style.transform;
+      const originalTransition = contentEl.style.transition;
+
+      contentEl.style.transition = 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)';
+      contentEl.style.backgroundColor = 'rgba(0, 168, 132, 0.38)';
+      contentEl.style.boxShadow = '0 0 0 2px #00a884, 0 8px 24px rgba(0, 168, 132, 0.55)';
+      contentEl.style.transform = 'scale(1.025)';
+
       setTimeout(() => {
-        el.style.backgroundColor = originalBg;
-      }, 1200);
+        contentEl.style.transition = 'all 0.6s ease-out';
+        contentEl.style.backgroundColor = originalBg;
+        contentEl.style.boxShadow = originalBoxShadow;
+        contentEl.style.transform = originalTransform;
+        setTimeout(() => {
+          contentEl.style.transition = originalTransition;
+        }, 600);
+      }, 1600);
     }
   };
 
@@ -1520,7 +1587,55 @@ export default function ChatContainer({
     );
   };
 
-  const renderDocumentCard = (file, fileIndex) => {
+  const handleDownloadOrOpenFile = async (file) => {
+    if (!file || !file.url) return;
+    const rawUrl = typeof file.url === "string" ? file.url.trim() : "";
+    const filename = file.filename || "download";
+
+    if (rawUrl.startsWith("data:")) {
+      try {
+        const res = await fetch(rawUrl);
+        const blob = await res.blob();
+        const blobUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => window.URL.revokeObjectURL(blobUrl), 2000);
+      } catch (err) {
+        console.error("Data URI download fallback:", err);
+        const link = document.createElement("a");
+        link.href = rawUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    } else if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://") || rawUrl.startsWith("blob:")) {
+      const link = document.createElement("a");
+      link.href = rawUrl;
+      link.download = filename;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      const fullUrl = `${host}/${rawUrl.replace(/^\/+/, "")}`;
+      const link = document.createElement("a");
+      link.href = fullUrl;
+      link.download = filename;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
+
+  const renderDocumentCard = (file, fileIndex = 0) => {
     const ext = (file.filename || file.url || "").split(".").pop().toLowerCase();
     let icon = "📄";
     let badgeColor = "#e53935"; // Red for PDF
@@ -1540,31 +1655,36 @@ export default function ChatContainer({
       typeLabel = ext.toUpperCase();
     } else {
       icon = "📎";
-      badgeColor = "#607d8b";
-      typeLabel = ext.toUpperCase() || "FILE";
+      badgeColor = "#4caf50";
     }
 
-    const formatSize = (bytes) => {
-      if (!bytes || bytes === 0) return "";
-      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    const formatFileSize = (bytes) => {
+      if (!bytes || isNaN(bytes)) return "";
+      if (bytes < 1024) return `${bytes} B`;
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
       return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     };
 
     return (
       <div
-        key={fileIndex}
+        key={`doc-${fileIndex}`}
+        onClick={() => handleDownloadOrOpenFile(file)}
         style={{
           display: "flex",
           alignItems: "center",
-          backgroundColor: "rgba(0, 0, 0, 0.25)",
+          backgroundColor: "#182229",
           borderRadius: "8px",
-          padding: "6px 10px",
+          padding: "8px 12px",
           marginBottom: "4px",
           gap: "8px",
           width: "240px",
           boxSizing: "border-box",
           border: "1px solid rgba(255, 255, 255, 0.08)",
+          cursor: "pointer",
+          transition: "background-color 0.15s ease",
         }}
+        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#202c33")}
+        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#182229")}
       >
         <div
           style={{
@@ -1597,28 +1717,31 @@ export default function ChatContainer({
             {file.filename || "Document"}
           </span>
           <span style={{ fontSize: "10px", color: "rgba(255, 255, 255, 0.6)" }}>
-            {typeLabel} {file.size ? `• ${formatSize(file.size)}` : ""}
+            {typeLabel} {file.size ? `• ${formatFileSize(file.size)}` : ""}
           </span>
         </div>
-        <a
-          href={`${host}/${file.url}`}
-          target="_blank"
-          rel="noopener noreferrer"
+        <div
           style={{
             backgroundColor: "#00a884",
             color: "#fff",
-            padding: "3px 8px",
+            padding: "4px 8px",
             borderRadius: "4px",
             fontSize: "11px",
-            textDecoration: "none",
             fontWeight: "bold",
             flexShrink: 0,
             cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "2px",
           }}
-          onClick={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleDownloadOrOpenFile(file);
+          }}
         >
-          Open
-        </a>
+          <DownloadIcon style={{ fontSize: "14px" }} />
+          <span>Open</span>
+        </div>
       </div>
     );
   };
@@ -1628,7 +1751,8 @@ export default function ChatContainer({
 
     const getFileUrl = (url) => {
       if (!url) return "";
-      return url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:") || url.startsWith("blob:") ? url : `${host}/${url}`;
+      const trimmed = typeof url === "string" ? url.trim() : "";
+      return trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("data:") || trimmed.startsWith("blob:") ? trimmed : `${host}/${trimmed.replace(/^\/+/, "")}`;
     };
 
     const audios = messageFiles.filter(
@@ -1719,7 +1843,13 @@ export default function ChatContainer({
               marginBottom: "4px",
               position: "relative",
             }}
-            onClick={() => window.open(getFileUrl(gif.url), "_blank")}
+            onClick={() => {
+              setLightboxData({
+                isOpen: true,
+                images: [{ url: getFileUrl(gif.url), filename: gif.filename || "GIF" }],
+                currentIndex: 0,
+              });
+            }}
           >
             <img
               src={getFileUrl(gif.url)}
@@ -1763,7 +1893,17 @@ export default function ChatContainer({
               backgroundColor: "#1f2c34",
               position: "relative",
             }}
-            onClick={() => window.open(getFileUrl(images[0].url), "_blank")}
+            onClick={() => {
+              const allImgs = images.map((img) => ({
+                url: getFileUrl(img.url),
+                filename: img.filename || "Photo",
+              }));
+              setLightboxData({
+                isOpen: true,
+                images: allImgs,
+                currentIndex: 0,
+              });
+            }}
           >
             <img
               src={getFileUrl(images[0].url)}
@@ -1858,7 +1998,17 @@ export default function ChatContainer({
                   cursor: "pointer",
                   backgroundColor: "#1f2c34",
                 }}
-                onClick={() => window.open(getFileUrl(img.url), "_blank")}
+                onClick={() => {
+                  const allImgs = images.map((im) => ({
+                    url: getFileUrl(im.url),
+                    filename: im.filename || "Photo",
+                  }));
+                  setLightboxData({
+                    isOpen: true,
+                    images: allImgs,
+                    currentIndex: i,
+                  });
+                }}
                 title={img.filename || "View image"}
               >
                 <img
@@ -2660,11 +2810,170 @@ export default function ChatContainer({
                 </div>
               )}
 
+              {/* Telegram-style Start Conversation Hero for 1-on-1 & Group Chats with 0 messages */}
+              {!isAiChat && messages.length === 0 && (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '36px 16px',
+                    maxWidth: '440px',
+                    margin: 'auto',
+                    textAlign: 'center',
+                    animation: 'fadeIn 0.3s ease-in-out',
+                  }}
+                >
+                  {/* Large Avatar */}
+                  <div style={{ position: 'relative', marginBottom: '16px' }}>
+                    <img
+                      src={getAvatarSrc(currentChat?.avtarImage)}
+                      alt={currentChat?.username || currentChat?.name || 'User'}
+                      style={{
+                        width: '90px',
+                        height: '90px',
+                        borderRadius: '50%',
+                        objectFit: 'cover',
+                        border: '3px solid rgba(0, 168, 132, 0.4)',
+                        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
+                      }}
+                    />
+                    {currentChat?.isGroup && (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          bottom: '2px',
+                          right: '2px',
+                          backgroundColor: '#00a884',
+                          borderRadius: '50%',
+                          width: '24px',
+                          height: '24px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#111b21',
+                          border: '2px solid #0b141a',
+                        }}
+                      >
+                        <GroupsIcon style={{ fontSize: '14px' }} />
+                      </div>
+                    )}
+                  </div>
+
+                  <h2 style={{ color: '#e9edef', fontSize: '20px', fontWeight: '600', margin: '0 0 6px 0' }}>
+                    {currentChat?.username || currentChat?.name || 'Chat'}
+                  </h2>
+
+                  <p style={{ color: '#8696a0', fontSize: '13.5px', lineHeight: '1.5', margin: '0 0 20px 0', maxWidth: '340px' }}>
+                    {currentChat?.isGroup
+                      ? "No messages in this group yet. Send a message to start the conversation!"
+                      : "No messages here yet... Send a message or tap the greeting below to start the conversation!"}
+                  </p>
+
+                  {/* Telegram-style Quick Greeting Button */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', alignItems: 'center' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleSendMsg("👋 Hello!")}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        backgroundColor: '#00a884',
+                        color: '#111b21',
+                        border: 'none',
+                        borderRadius: '24px',
+                        padding: '12px 28px',
+                        fontSize: '15px',
+                        fontWeight: '700',
+                        cursor: 'pointer',
+                        boxShadow: '0 4px 16px rgba(0, 168, 132, 0.35)',
+                        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'scale(1.05)';
+                        e.currentTarget.style.backgroundColor = '#02be96';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'scale(1)';
+                        e.currentTarget.style.backgroundColor = '#00a884';
+                      }}
+                    >
+                      <span style={{ fontSize: '20px' }}>👋</span>
+                      <span>Say Hello to {currentChat?.username || currentChat?.name}!</span>
+                    </button>
+
+                    {/* Quick Greeting Chips */}
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '4px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                      {[
+                        { emoji: "👋", text: "Hi there!" },
+                        { emoji: "✨", text: "Hey! How are you?" },
+                        { emoji: "🤝", text: "Nice to connect!" }
+                      ].map((item, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => handleSendMsg(`${item.emoji} ${item.text}`)}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            backgroundColor: '#202c33',
+                            color: '#d1d7db',
+                            border: '1px solid rgba(255, 255, 255, 0.08)',
+                            borderRadius: '16px',
+                            padding: '6px 14px',
+                            fontSize: '12.5px',
+                            fontWeight: '500',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = '#2a3942';
+                            e.currentTarget.style.borderColor = '#00a884';
+                            e.currentTarget.style.color = '#00a884';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = '#202c33';
+                            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                            e.currentTarget.style.color = '#d1d7db';
+                          }}
+                        >
+                          <span>{item.emoji}</span>
+                          <span>{item.text}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {messages.map((message, index) => {
-                const messageFiles = message.files && message.files.length > 0 ? message.files : (message.imgpath ? [{ url: message.imgpath, filename: message.imgpath.split("/").pop(), fileType: "image" }] : []);
+                const messageFiles = message.files && message.files.length > 0 
+                  ? message.files 
+                  : (message.imgpath 
+                      ? [{ 
+                          url: message.imgpath, 
+                          filename: typeof message.imgpath === "string" && message.imgpath.startsWith("data:") 
+                            ? "image.png" 
+                            : ((typeof message.imgpath === "string" && message.imgpath.split("/").pop()) || "image.png"), 
+                          fileType: "image" 
+                        }] 
+                      : []);
                 const emojiOnlyInfo = getEmojiOnlyInfo(message.message, messageFiles.length > 0);
                 const showDay = index === 0 || getDay(message.timestamp) !== getDay(messages[index - 1]?.timestamp);
                 const isGroupMsg = currentChat.isGroup || message.isGroup;
+
+                const prevMessage = index > 0 ? messages[index - 1] : null;
+                const isPrevSameSender = prevMessage &&
+                  !prevMessage.isSystem &&
+                  !prevMessage.isDeleted &&
+                  ((prevMessage.fromSelf && message.fromSelf) || (!prevMessage.fromSelf && !message.fromSelf && ((prevMessage.senderId && prevMessage.senderId === message.senderId) || (prevMessage.senderName && prevMessage.senderName === message.senderName)))) &&
+                  getDay(prevMessage.timestamp) === getDay(message.timestamp);
+
+                const showSenderName = isGroupMsg && !message.fromSelf && !isPrevSameSender;
 
                 const isSystemMsg = Boolean(message.isSystem) || (
                   typeof message.message === 'string' &&
@@ -2804,7 +3113,10 @@ export default function ChatContainer({
                       className={`message${message.fromSelf ? " sended" : " recieved"}`}
                       onMouseEnter={() => handleContentMouseEnter(index)}
                       onMouseLeave={handleContentMouseLeave}
-                      style={{ position: "relative" }}
+                      style={{
+                        position: "relative",
+                        marginBottom: message.reactions && message.reactions.length > 0 ? "12px" : "2px",
+                      }}
                     >
                       {/* Floating Action Bar on Hover or when Translate Menu is open */}
                       {(hoveredMessageIndex === index || activeTranslateMsgId === message._id) && (
@@ -2854,7 +3166,7 @@ export default function ChatContainer({
                                 }}
                                 title="Forward message"
                               >
-                                <ForwardIcon style={{ fontSize: "16px", transform: "scaleX(-1)" }} />
+                                <ReplyIcon style={{ fontSize: "16px", transform: "scaleX(-1)" }} />
                               </button>
 
                               {/* Star Button */}
@@ -3144,7 +3456,7 @@ export default function ChatContainer({
                               ✨ ChatNex AI
                             </span>
                           </div>
-                        ) : isGroupMsg && !message.fromSelf ? (
+                        ) : showSenderName ? (
                           <div
                             style={{
                               color: "#00a884",
@@ -3322,62 +3634,72 @@ export default function ChatContainer({
                           {renderTicks(message)}
                         </div>
 
-                        {/* Reactions Badges Row */}
+                        {/* WhatsApp-style Floating Reactions Pill */}
                         {message.reactions && message.reactions.length > 0 && (
                           <div
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setReactionActiveTab("all");
+                              setReactionsModalMsg(message);
+                            }}
+                            title="View reactions"
                             style={{
-                              display: "flex",
-                              flexWrap: "wrap",
-                              gap: "4px",
-                              marginTop: "4px",
-                              paddingTop: "2px",
-                              borderTop: "1px solid rgba(255,255,255,0.06)",
+                              position: "absolute",
+                              bottom: "-10px",
+                              [message.fromSelf ? "right" : "left"]: "10px",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "3px",
+                              backgroundColor: "#1f2c34",
+                              border: "1px solid rgba(255, 255, 255, 0.15)",
+                              borderRadius: "14px",
+                              padding: "2px 7px",
+                              boxShadow: "0 2px 6px rgba(0,0,0,0.5)",
+                              zIndex: 2,
+                              userSelect: "none",
+                              cursor: "pointer",
+                              transition: "all 0.15s ease",
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.transform = "scale(1.08)";
+                              e.currentTarget.style.backgroundColor = "#2a3942";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.transform = "scale(1)";
+                              e.currentTarget.style.backgroundColor = "#1f2c34";
                             }}
                           >
                             {Object.entries(
                               message.reactions.reduce((acc, r) => {
                                 const em = r.emoji;
-                                if (!acc[em]) acc[em] = { count: 0, users: [], hasUser: false };
+                                if (!acc[em]) acc[em] = { count: 0, users: [] };
                                 acc[em].count += 1;
                                 acc[em].users.push(r.username || "User");
-                                if ((r.userId || r.user || "").toString() === (currentUser?._id || "").toString()) {
-                                  acc[em].hasUser = true;
-                                }
                                 return acc;
                               }, {})
                             ).map(([emoji, data]) => (
-                              <div
+                              <span
                                 key={emoji}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleReactToMessage(message, emoji);
-                                }}
-                                title={`Reacted by: ${data.users.join(", ")}`}
                                 style={{
-                                  display: "flex",
+                                  display: "inline-flex",
                                   alignItems: "center",
-                                  gap: "3px",
-                                  backgroundColor: data.hasUser ? "rgba(0, 168, 132, 0.25)" : "#202c33",
-                                  border: data.hasUser ? "1px solid #00a884" : "1px solid rgba(255, 255, 255, 0.12)",
-                                  borderRadius: "12px",
-                                  padding: "2px 6px",
+                                  gap: "2px",
                                   fontSize: "12px",
-                                  cursor: "pointer",
-                                  userSelect: "none",
-                                  boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-                                  transition: "transform 0.15s",
                                 }}
-                                onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.08)")}
-                                onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
                               >
                                 <span>{emoji}</span>
                                 {data.count > 1 && (
-                                  <span style={{ fontSize: "11px", fontWeight: "600", color: data.hasUser ? "#00a884" : "#8696a0" }}>
+                                  <span style={{ fontSize: "10.5px", fontWeight: "600", color: "#8696a0", marginLeft: "1px" }}>
                                     {data.count}
                                   </span>
                                 )}
-                              </div>
+                              </span>
                             ))}
+                            {message.reactions.length > 1 && (
+                              <span style={{ fontSize: "11px", fontWeight: "600", color: "#8696a0", marginLeft: "2px" }}>
+                                {message.reactions.length}
+                              </span>
+                            )}
                           </div>
                         )}
                       </div>
@@ -3587,6 +3909,12 @@ export default function ChatContainer({
               onOpenSearch={() => {
                 setShowSearchInputBar(true);
                 setShowInfoDrawer(false);
+              }}
+              onGoToMessage={(msgId) => {
+                setShowInfoDrawer(false);
+                setTimeout(() => {
+                  scrollToMessage(msgId);
+                }, 120);
               }}
               showToast={showToast}
             />
@@ -3929,7 +4257,7 @@ export default function ChatContainer({
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <ForwardIcon style={{ color: '#00a884', fontSize: '22px', transform: 'scaleX(-1)' }} />
+                    <ReplyIcon style={{ color: '#00a884', fontSize: '22px', transform: 'scaleX(-1)' }} />
                     <h3 style={{ margin: 0, color: '#e9edef', fontSize: '16px', fontWeight: '600' }}>
                       Forward message to...
                     </h3>
@@ -4104,7 +4432,7 @@ export default function ChatContainer({
                         gap: '6px',
                       }}
                     >
-                      <ForwardIcon style={{ fontSize: '16px', transform: 'scaleX(-1)' }} />
+                      <ReplyIcon style={{ fontSize: '16px', transform: 'scaleX(-1)' }} />
                       {isForwarding ? 'Forwarding...' : `Forward (${selectedForwardRecipients.length})`}
                     </button>
                   </div>
@@ -4311,6 +4639,462 @@ export default function ChatContainer({
                   </button>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* WhatsApp-style Message Reactions Breakdown Modal */}
+          {reactionsModalMsg && (() => {
+            const currentMsg = messages.find((m) => m._id === reactionsModalMsg._id) || reactionsModalMsg;
+            const rawReactions = currentMsg?.reactions || [];
+
+            if (rawReactions.length === 0) {
+              return null;
+            }
+
+            // Aggregate emoji counts
+            const emojiGroups = rawReactions.reduce((acc, r) => {
+              const em = r.emoji;
+              if (!acc[em]) acc[em] = 0;
+              acc[em] += 1;
+              return acc;
+            }, {});
+
+            const allTabs = [
+              { key: "all", label: `All ${rawReactions.length}` },
+              ...Object.entries(emojiGroups).map(([em, count]) => ({
+                key: em,
+                label: `${em} ${count}`,
+              })),
+            ];
+
+            const filteredReactions = reactionActiveTab === "all"
+              ? rawReactions
+              : rawReactions.filter((r) => r.emoji === reactionActiveTab);
+
+            return (
+              <div
+                style={{
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: 'rgba(0, 0, 0, 0.75)',
+                  zIndex: 99999,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  animation: 'fadeIn 0.2s ease-out',
+                }}
+                onClick={() => setReactionsModalMsg(null)}
+              >
+                <div
+                  style={{
+                    backgroundColor: '#202c33',
+                    borderRadius: '12px',
+                    width: '380px',
+                    maxWidth: '92vw',
+                    maxHeight: '480px',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    boxShadow: '0 12px 36px rgba(0, 0, 0, 0.7)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden',
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Modal Header */}
+                  <div
+                    style={{
+                      padding: '14px 18px',
+                      backgroundColor: '#111b21',
+                      borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <h3 style={{ margin: 0, color: '#e9edef', fontSize: '15.5px', fontWeight: '600' }}>
+                      Reactions
+                    </h3>
+                    <CloseIcon
+                      style={{ color: '#8696a0', cursor: 'pointer', fontSize: '20px' }}
+                      onClick={() => setReactionsModalMsg(null)}
+                    />
+                  </div>
+
+                  {/* Tab Filters (All, 👍 1, ❤️ 1...) */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '8px 14px',
+                      borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                      overflowX: 'auto',
+                      scrollbarWidth: 'none',
+                    }}
+                  >
+                    {allTabs.map((tab) => {
+                      const isActive = reactionActiveTab === tab.key;
+                      return (
+                        <button
+                          key={tab.key}
+                          type="button"
+                          onClick={() => setReactionActiveTab(tab.key)}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '5px 12px',
+                            borderRadius: '20px',
+                            border: 'none',
+                            backgroundColor: isActive ? '#00a884' : 'rgba(255, 255, 255, 0.08)',
+                            color: isActive ? '#111b21' : '#e9edef',
+                            fontWeight: isActive ? '700' : '500',
+                            fontSize: '13px',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {tab.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Reactions List */}
+                  <div
+                    style={{
+                      padding: '6px 0',
+                      overflowY: 'auto',
+                      maxHeight: '340px',
+                    }}
+                  >
+                    {filteredReactions.map((r, idx) => {
+                      const rUserId = (r.userId?._id || r.userId || r.user || '').toString();
+                      const isMe = rUserId === (currentUser?._id || '').toString();
+                      const matchedContact = (contacts || []).find((c) => (c._id || c).toString() === rUserId);
+                      const displayName = isMe ? 'You' : (r.username || matchedContact?.name || matchedContact?.username || 'User');
+                      const rawAvatar = isMe
+                        ? (currentUser?.avtarImage || r.userAvatar)
+                        : (r.userAvatar || matchedContact?.avtarImage || '');
+                      const avatarSrc = rawAvatar ? getAvatarSrc(rawAvatar) : null;
+
+                      return (
+                        <div
+                          key={`${rUserId}_${r.emoji}_${idx}`}
+                          onClick={() => {
+                            if (isMe) {
+                              handleReactToMessage(currentMsg, r.emoji);
+                            }
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '10px 18px',
+                            cursor: isMe ? 'pointer' : 'default',
+                            transition: 'background-color 0.15s ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            if (isMe) e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+                          }}
+                          onMouseLeave={(e) => {
+                            if (isMe) e.currentTarget.style.backgroundColor = 'transparent';
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <div style={{ position: 'relative', width: '38px', height: '38px', flexShrink: 0 }}>
+                              {avatarSrc && (
+                                <img
+                                  src={avatarSrc}
+                                  alt={displayName}
+                                  style={{
+                                    width: '38px',
+                                    height: '38px',
+                                    borderRadius: '50%',
+                                    objectFit: 'cover',
+                                    position: 'absolute',
+                                    top: 0,
+                                    left: 0,
+                                    zIndex: 2,
+                                  }}
+                                  onError={(e) => {
+                                    e.currentTarget.style.display = 'none';
+                                  }}
+                                />
+                              )}
+                              <div
+                                style={{
+                                  width: '38px',
+                                  height: '38px',
+                                  borderRadius: '50%',
+                                  backgroundColor: '#00a884',
+                                  color: '#111b21',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontWeight: '700',
+                                  fontSize: '15px',
+                                  position: 'absolute',
+                                  top: 0,
+                                  left: 0,
+                                  zIndex: 1,
+                                }}
+                              >
+                                {displayName.charAt(0).toUpperCase()}
+                              </div>
+                            </div>
+
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                              <span style={{ color: isMe ? '#00a884' : '#e9edef', fontSize: '14px', fontWeight: '500' }}>
+                                {displayName}
+                              </span>
+                              {isMe && (
+                                <span style={{ color: '#8696a0', fontSize: '11.5px', marginTop: '1px' }}>
+                                  Click to remove reaction
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div style={{ fontSize: '20px' }}>
+                            {r.emoji}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {lightboxData && (
+            <div
+              style={{
+                position: 'fixed',
+                inset: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.92)',
+                zIndex: 999999,
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '16px',
+                backdropFilter: 'blur(8px)',
+                userSelect: 'none',
+              }}
+              onClick={() => setLightboxData(null)}
+            >
+              {/* Top Header */}
+              <div
+                style={{
+                  width: '100%',
+                  maxWidth: '1200px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '8px 12px',
+                  color: '#e9edef',
+                  zIndex: 10,
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <span style={{ fontSize: '15px', fontWeight: 500, color: '#e9edef' }}>
+                    {lightboxData.images[lightboxData.currentIndex]?.name || 'Photo'}
+                  </span>
+                  {lightboxData.images.length > 1 && (
+                    <span style={{ fontSize: '13px', color: '#8696a0', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '12px' }}>
+                      {lightboxData.currentIndex + 1} of {lightboxData.images.length}
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const currentImg = lightboxData.images[lightboxData.currentIndex];
+                      if (currentImg) {
+                        handleDownloadOrOpenFile(currentImg.url, currentImg.name || 'image.png');
+                      }
+                    }}
+                    title="Download"
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.12)',
+                      border: 'none',
+                      color: '#fff',
+                      borderRadius: '50%',
+                      width: '40px',
+                      height: '40px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      fontSize: '18px',
+                    }}
+                  >
+                    ⬇
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLightboxData(null)}
+                    title="Close (Esc)"
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.12)',
+                      border: 'none',
+                      color: '#fff',
+                      borderRadius: '50%',
+                      width: '40px',
+                      height: '40px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      fontSize: '20px',
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              {/* Main Image View & Navigation Controls */}
+              <div
+                style={{
+                  position: 'relative',
+                  width: '100%',
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  overflow: 'hidden',
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {lightboxData.images.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setLightboxData((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              currentIndex: (prev.currentIndex - 1 + prev.images.length) % prev.images.length,
+                            }
+                          : null
+                      );
+                    }}
+                    style={{
+                      position: 'absolute',
+                      left: '20px',
+                      zIndex: 10,
+                      background: 'rgba(0, 0, 0, 0.6)',
+                      border: '1px solid rgba(255, 255, 255, 0.2)',
+                      color: '#fff',
+                      borderRadius: '50%',
+                      width: '50px',
+                      height: '50px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      fontSize: '28px',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                    }}
+                    title="Previous Image"
+                  >
+                    <NavigateBeforeIcon style={{ fontSize: '32px' }} />
+                  </button>
+                )}
+
+                <img
+                  src={lightboxData.images[lightboxData.currentIndex]?.url}
+                  alt={lightboxData.images[lightboxData.currentIndex]?.name || 'Preview'}
+                  style={{
+                    maxWidth: '90vw',
+                    maxHeight: '80vh',
+                    objectFit: 'contain',
+                    borderRadius: '8px',
+                    boxShadow: '0 12px 40px rgba(0,0,0,0.8)',
+                  }}
+                />
+
+                {lightboxData.images.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setLightboxData((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              currentIndex: (prev.currentIndex + 1) % prev.images.length,
+                            }
+                          : null
+                      );
+                    }}
+                    style={{
+                      position: 'absolute',
+                      right: '20px',
+                      zIndex: 10,
+                      background: 'rgba(0, 0, 0, 0.6)',
+                      border: '1px solid rgba(255, 255, 255, 0.2)',
+                      color: '#fff',
+                      borderRadius: '50%',
+                      width: '50px',
+                      height: '50px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      fontSize: '28px',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                    }}
+                    title="Next Image"
+                  >
+                    <NavigateNextIcon style={{ fontSize: '32px' }} />
+                  </button>
+                )}
+              </div>
+
+              {/* Bottom Thumbnail Strip (if multiple images) */}
+              {lightboxData.images.length > 1 && (
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: '8px',
+                    overflowX: 'auto',
+                    maxWidth: '90vw',
+                    padding: '10px',
+                    zIndex: 10,
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {lightboxData.images.map((img, idx) => (
+                    <img
+                      key={idx}
+                      src={img.url}
+                      alt={`Thumb ${idx + 1}`}
+                      onClick={() => setLightboxData((prev) => prev ? { ...prev, currentIndex: idx } : null)}
+                      style={{
+                        width: '52px',
+                        height: '52px',
+                        objectFit: 'cover',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        border: idx === lightboxData.currentIndex ? '2px solid #00a884' : '2px solid transparent',
+                        opacity: idx === lightboxData.currentIndex ? 1 : 0.6,
+                        transition: 'all 0.2s',
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

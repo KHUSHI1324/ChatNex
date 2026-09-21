@@ -22,7 +22,9 @@ import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import DescriptionIcon from '@mui/icons-material/Description';
 import TableChartIcon from '@mui/icons-material/TableChart';
+import AudiotrackIcon from '@mui/icons-material/Audiotrack';
 import LinkIcon from '@mui/icons-material/Link';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos';
 import { getAvatarSrc } from '../utils/avatarHelper';
@@ -57,6 +59,7 @@ export default function ChatInfoDrawer({
   onDeleteGroup,
   onUpdateCurrentUser,
   onOpenSearch,
+  onGoToMessage,
   showToast,
 }) {
   const [memberSearchQuery, setMemberSearchQuery] = useState('');
@@ -109,19 +112,47 @@ export default function ChatInfoDrawer({
           const url = resolveMediaUrl(rawUrl);
           const filename = f.filename || rawUrl.split('/').pop() || 'File';
           const ext = (filename.split('.').pop() || '').toLowerCase();
-          const fType = f.fileType || '';
+          const fType = (f.fileType || '').toLowerCase();
+          const mime = (f.mimeType || '').toLowerCase();
 
-          if (
-            fType === 'image' ||
-            fType === 'video' ||
-            fType === 'gif' ||
-            ['jpg', 'jpeg', 'png', 'webp', 'gif', 'mp4', 'mov', 'webm', 'mkv'].includes(ext)
-          ) {
+          const isAudio =
+            fType === 'audio' ||
+            fType === 'voice' ||
+            mime.startsWith('audio/') ||
+            filename.toLowerCase().includes('voice-note-') ||
+            rawUrl.toLowerCase().includes('voice-note-') ||
+            ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'opus', 'weba', 'flac'].includes(ext);
+
+          const isVideo =
+            !isAudio &&
+            (fType === 'video' ||
+              mime.startsWith('video/') ||
+              ['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v'].includes(ext));
+
+          const isImage =
+            !isAudio &&
+            !isVideo &&
+            (fType === 'image' ||
+              fType === 'gif' ||
+              mime.startsWith('image/') ||
+              ['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg', 'bmp'].includes(ext));
+
+          if (isImage || isVideo) {
             media.push({
               _id: msg._id,
               url,
               filename,
-              fileType: fType === 'video' || ['mp4', 'mov', 'webm', 'mkv'].includes(ext) ? 'video' : 'image',
+              fileType: isVideo ? 'video' : 'image',
+              timestamp: msg.timestamp || msg.createdAt,
+              senderName: msg.senderName,
+            });
+          } else if (isAudio) {
+            docs.push({
+              _id: msg._id,
+              url,
+              filename: filename.toLowerCase().includes('voice-note-') ? `Voice Note (${new Date(msg.timestamp || msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : filename,
+              fileType: 'audio',
+              size: f.size || 0,
               timestamp: msg.timestamp || msg.createdAt,
               senderName: msg.senderName,
             });
@@ -142,7 +173,22 @@ export default function ChatInfoDrawer({
         const url = resolveMediaUrl(rawUrl);
         const filename = rawUrl.split('/').pop() || 'Media';
         const ext = (filename.split('.').pop() || '').toLowerCase();
-        if (['mp4', 'mov', 'webm', 'mkv'].includes(ext)) {
+
+        const isAudio =
+          filename.toLowerCase().includes('voice-note-') ||
+          rawUrl.toLowerCase().includes('voice-note-') ||
+          ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'opus', 'weba', 'flac'].includes(ext);
+
+        const isVideo =
+          !isAudio &&
+          ['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v'].includes(ext);
+
+        const isImage =
+          !isAudio &&
+          !isVideo &&
+          ['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg', 'bmp'].includes(ext);
+
+        if (isVideo) {
           media.push({
             _id: msg._id,
             url,
@@ -151,12 +197,22 @@ export default function ChatInfoDrawer({
             timestamp: msg.timestamp || msg.createdAt,
             senderName: msg.senderName,
           });
-        } else if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg'].includes(ext)) {
+        } else if (isImage) {
           media.push({
             _id: msg._id,
             url,
             filename,
             fileType: 'image',
+            timestamp: msg.timestamp || msg.createdAt,
+            senderName: msg.senderName,
+          });
+        } else if (isAudio) {
+          docs.push({
+            _id: msg._id,
+            url,
+            filename: filename.toLowerCase().includes('voice-note-') ? `Voice Note (${new Date(msg.timestamp || msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : filename,
+            fileType: 'audio',
+            size: 0,
             timestamp: msg.timestamp || msg.createdAt,
             senderName: msg.senderName,
           });
@@ -235,8 +291,6 @@ export default function ChatInfoDrawer({
     return Array.from(map.values());
   }, [chat?.members, contacts, currentUser]);
 
-  if (!chat) return null;
-
   const isGroup = Boolean(chat?.isGroup);
   const members = chat?.members || [];
   const currentUserIdStr = (currentUser?._id || '').toString();
@@ -252,10 +306,30 @@ export default function ChatInfoDrawer({
       chat.admins.some((a) => (a?._id || a || '').toString() === currentUserIdStr))
   );
 
+  // Privacy evaluation for direct chat
+  const targetUserIdStr = (chat?._id || '').toString();
+  const mySaved = (currentUser?.savedContacts || []).map((id) => (id?._id || id).toString());
+  const theirSaved = (chat?.savedContacts || []).map((id) => (id?._id || id).toString());
+  const isDirectContact = !isGroup && Boolean(
+    targetUserIdStr && currentUserIdStr && (mySaved.includes(targetUserIdStr) || theirSaved.includes(currentUserIdStr))
+  );
+
+  const emailPrivacy = chat?.privacySettings?.email || 'everyone';
+  const canViewEmail = isGroup ? false : (
+    emailPrivacy === 'nobody' ? false : (emailPrivacy === 'contacts' ? isDirectContact : true)
+  );
+
+  const aboutPrivacy = chat?.privacySettings?.about || 'everyone';
+  const canViewAbout = isGroup ? true : (
+    aboutPrivacy === 'nobody' ? false : (aboutPrivacy === 'contacts' ? isDirectContact : true)
+  );
+
   // Can edit group name/description/avatar: only admin, OR if permission is 'everyone'
   const canEditGroupInfo = isGroup && isCurrentMember && (
-    isCurrentUserAdmin || (chat.permissions?.editGroupInfo !== 'admins')
+    isCurrentUserAdmin || (chat?.permissions?.editGroupInfo !== 'admins')
   );
+
+  if (!chat) return null;
 
   const filteredMembers = members.filter((m) =>
     (m.username || '').toLowerCase().includes(memberSearchQuery.toLowerCase()) ||
@@ -442,6 +516,8 @@ export default function ChatInfoDrawer({
       return <TableChartIcon style={{ color: '#00a884', fontSize: '26px' }} />;
     if (t.includes('doc') || t.includes('word'))
       return <DescriptionIcon style={{ color: '#53bdeb', fontSize: '26px' }} />;
+    if (t.includes('audio') || t.includes('voice') || t.includes('mp3') || t.includes('wav') || t.includes('ogg'))
+      return <AudiotrackIcon style={{ color: '#00a884', fontSize: '26px' }} />;
     return <InsertDriveFileIcon style={{ color: '#8696a0', fontSize: '26px' }} />;
   };
 
@@ -831,7 +907,11 @@ export default function ChatInfoDrawer({
             <span style={{ color: '#8696a0', fontSize: '13px', marginBottom: '18px' }}>
               {isGroup
                 ? `Group • ${members.length} member${members.length !== 1 ? 's' : ''}`
-                : chat.email || 'ChatNex User'}
+                : canViewEmail && chat.email
+                ? chat.email
+                : canViewAbout && chat.about
+                ? chat.about
+                : 'ChatNex User'}
             </span>
 
             {/* Quick Action Buttons: Audio, Video, Add, Search */}
@@ -888,7 +968,7 @@ export default function ChatInfoDrawer({
             </div>
           </div>
 
-          {/* Group Description / About */}
+          {/* Group Description / User About & Contact Info */}
           <div
             style={{
               backgroundColor: '#111b21',
@@ -912,9 +992,27 @@ export default function ChatInfoDrawer({
               )}
             </div>
             <div style={{ color: '#e9edef', fontSize: '13.5px', lineHeight: '1.4', whiteSpace: 'pre-wrap' }}>
-              {isGroup
-                ? chat.description || <span style={{ color: '#8696a0', fontStyle: 'italic' }}>Add group description...</span>
-                : chat.email ? `Email: ${chat.email}` : 'Hey there! I am using ChatNex.'}
+              {isGroup ? (
+                chat.description || <span style={{ color: '#8696a0', fontStyle: 'italic' }}>Add group description...</span>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {canViewAbout && (
+                    <div style={{ color: '#e9edef', fontSize: '14px' }}>
+                      {chat.about || 'Hey there! I am using ChatNex.'}
+                    </div>
+                  )}
+                  {canViewEmail && chat.email && (
+                    <div style={{ color: '#8696a0', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ color: '#aebac1', fontWeight: '500' }}>Email:</span> {chat.email}
+                    </div>
+                  )}
+                  {!canViewAbout && !canViewEmail && (
+                    <div style={{ color: '#8696a0', fontSize: '13px', fontStyle: 'italic' }}>
+                      🔒 Contact info is private
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             {isGroup && chat.createdAt && (
               <div style={{ color: '#8696a0', fontSize: '11.5px', marginTop: '8px' }}>
@@ -1422,23 +1520,65 @@ export default function ChatInfoDrawer({
                         </div>
                       </div>
 
-                      <a
-                        href={doc.url}
-                        download={doc.filename}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{
-                          color: '#00a884',
-                          padding: '6px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          borderRadius: '50%',
-                        }}
-                        title="Download Document"
-                      >
-                        <FileDownloadIcon style={{ fontSize: '20px' }} />
-                      </a>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (onGoToMessage && doc._id) {
+                              onGoToMessage(doc._id);
+                            }
+                          }}
+                          style={{
+                            color: '#8696a0',
+                            backgroundColor: 'transparent',
+                            border: 'none',
+                            padding: '6px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            borderRadius: '50%',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.color = '#00a884';
+                            e.currentTarget.style.backgroundColor = 'rgba(0, 168, 132, 0.15)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.color = '#8696a0';
+                            e.currentTarget.style.backgroundColor = 'transparent';
+                          }}
+                          title="Show in chat"
+                        >
+                          <VisibilityIcon style={{ fontSize: '20px' }} />
+                        </button>
+
+                        <a
+                          href={doc.url}
+                          download={doc.filename}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            color: '#00a884',
+                            padding: '6px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            borderRadius: '50%',
+                            transition: 'all 0.15s ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = 'rgba(0, 168, 132, 0.15)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = 'transparent';
+                          }}
+                          title="Download Document"
+                        >
+                          <FileDownloadIcon style={{ fontSize: '20px' }} />
+                        </a>
+                      </div>
                     </div>
                   ))
                 ) : (
@@ -1506,23 +1646,71 @@ export default function ChatInfoDrawer({
                         </div>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          navigator.clipboard.writeText(linkItem.url);
-                          showToast?.('info', 'Link Copied', 'URL copied to clipboard.');
-                        }}
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          color: '#8696a0',
-                          cursor: 'pointer',
-                          padding: '6px',
-                        }}
-                        title="Copy Link"
-                      >
-                        <ContentCopyIcon style={{ fontSize: '16px' }} />
-                      </button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (onGoToMessage && linkItem._id) {
+                              onGoToMessage(linkItem._id);
+                            }
+                          }}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: '#8696a0',
+                            cursor: 'pointer',
+                            padding: '6px',
+                            borderRadius: '50%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            transition: 'all 0.15s ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.color = '#00a884';
+                            e.currentTarget.style.backgroundColor = 'rgba(0, 168, 132, 0.15)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.color = '#8696a0';
+                            e.currentTarget.style.backgroundColor = 'transparent';
+                          }}
+                          title="Show in chat"
+                        >
+                          <VisibilityIcon style={{ fontSize: '19px' }} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(linkItem.url);
+                            showToast?.('info', 'Link Copied', 'URL copied to clipboard.');
+                          }}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: '#8696a0',
+                            cursor: 'pointer',
+                            padding: '6px',
+                            borderRadius: '50%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            transition: 'all 0.15s ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.color = '#00a884';
+                            e.currentTarget.style.backgroundColor = 'rgba(0, 168, 132, 0.15)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.color = '#8696a0';
+                            e.currentTarget.style.backgroundColor = 'transparent';
+                          }}
+                          title="Copy Link"
+                        >
+                          <ContentCopyIcon style={{ fontSize: '18px' }} />
+                        </button>
+                      </div>
                     </div>
                   ))
                 ) : (
@@ -2589,6 +2777,30 @@ export default function ChatInfoDrawer({
               zIndex: 10,
             }}
           >
+            <div
+              style={{
+                color: '#fff',
+                backgroundColor: 'rgba(255,255,255,0.2)',
+                padding: '8px',
+                borderRadius: '50%',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.15s ease',
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                const msgId = previewMediaModal._id;
+                setPreviewMediaModal(null);
+                if (onGoToMessage && msgId) {
+                  onGoToMessage(msgId);
+                }
+              }}
+              title="Show in chat"
+            >
+              <VisibilityIcon style={{ fontSize: '20px' }} />
+            </div>
             <a
               href={previewMediaModal.url}
               download={previewMediaModal.filename}

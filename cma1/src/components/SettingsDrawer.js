@@ -6,6 +6,7 @@ import {
   unblockUserRoute,
   blockUserRoute,
   setPasscodeRoute,
+  updateProfileRoute,
 } from '../utils/APIRoutes';
 import { getAvatarSrc } from '../utils/avatarHelper';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -14,6 +15,7 @@ import LockIcon from '@mui/icons-material/Lock';
 import BlockIcon from '@mui/icons-material/Block';
 import WallpaperIcon from '@mui/icons-material/Wallpaper';
 import DoneIcon from '@mui/icons-material/Done';
+import EditIcon from '@mui/icons-material/Edit';
 
 export default function SettingsDrawer({
   currentUser,
@@ -23,13 +25,20 @@ export default function SettingsDrawer({
   onLockAppNow,
   showToast,
 }) {
-  const [activeSection, setActiveSection] = useState('main'); // 'main' | 'privacy' | 'blocked' | 'passcode' | 'wallpaper'
+  const [activeSection, setActiveSection] = useState('main'); // 'main' | 'profile' | 'privacy' | 'blocked' | 'passcode' | 'wallpaper'
   const [privacySettings, setPrivacySettings] = useState({
     lastSeen: currentUser?.privacySettings?.lastSeen || 'everyone',
     readReceipts: currentUser?.privacySettings?.readReceipts !== false,
     profilePhoto: currentUser?.privacySettings?.profilePhoto || 'everyone',
+    email: currentUser?.privacySettings?.email || 'everyone',
+    about: currentUser?.privacySettings?.about || 'everyone',
   });
   const [isSavingPrivacy, setIsSavingPrivacy] = useState(false);
+
+  // Profile About / Status
+  const [aboutText, setAboutText] = useState(currentUser?.about || 'Hey there! I am using ChatNex.');
+  const [isEditingAbout, setIsEditingAbout] = useState(false);
+  const [isSavingAbout, setIsSavingAbout] = useState(false);
 
   // Blocked users
   const [blockedList, setBlockedList] = useState([]);
@@ -65,8 +74,18 @@ export default function SettingsDrawer({
   useEffect(() => {
     if (currentUser?._id) {
       fetchBlockedUsers();
+      if (currentUser?.about) setAboutText(currentUser.about);
+      if (currentUser?.privacySettings) {
+        setPrivacySettings({
+          lastSeen: currentUser.privacySettings.lastSeen || 'everyone',
+          readReceipts: currentUser.privacySettings.readReceipts !== false,
+          profilePhoto: currentUser.privacySettings.profilePhoto || 'everyone',
+          email: currentUser.privacySettings.email || 'everyone',
+          about: currentUser.privacySettings.about || 'everyone',
+        });
+      }
     }
-  }, [currentUser?._id, fetchBlockedUsers]);
+  }, [currentUser, fetchBlockedUsers]);
 
   const handleUpdatePrivacy = async (key, val) => {
     const updated = { ...privacySettings, [key]: val };
@@ -78,10 +97,12 @@ export default function SettingsDrawer({
         privacySettings: updated,
       });
       if (res.data?.status) {
-        onUpdateCurrentUser({
+        const updatedUser = {
           ...currentUser,
           privacySettings: updated,
-        });
+        };
+        onUpdateCurrentUser(updatedUser);
+        localStorage.setItem('chat-app-user', JSON.stringify(updatedUser));
         showToast?.('success', 'Privacy Updated', 'Your privacy settings were saved.');
       }
     } catch (err) {
@@ -89,6 +110,34 @@ export default function SettingsDrawer({
       showToast?.('error', 'Update Failed', 'Could not save privacy settings.');
     } finally {
       setIsSavingPrivacy(false);
+    }
+  };
+
+  const handleSaveAbout = async (newAbout) => {
+    const val = (newAbout !== undefined ? newAbout : aboutText).trim();
+    if (!val) return;
+    try {
+      setIsSavingAbout(true);
+      const res = await axios.post(updateProfileRoute, {
+        userId: currentUser._id,
+        about: val,
+      });
+      if (res.data?.status) {
+        setAboutText(val);
+        setIsEditingAbout(false);
+        const updatedUser = {
+          ...currentUser,
+          about: val,
+        };
+        onUpdateCurrentUser(updatedUser);
+        localStorage.setItem('chat-app-user', JSON.stringify(updatedUser));
+        showToast?.('success', 'About Updated', 'Your status has been updated.');
+      }
+    } catch (err) {
+      console.error('Error updating about status:', err);
+      showToast?.('error', 'Error', 'Failed to update about status.');
+    } finally {
+      setIsSavingAbout(false);
     }
   };
 
@@ -352,35 +401,149 @@ export default function SettingsDrawer({
       {/* Main Settings Menu */}
       {activeSection === 'main' && (
         <div style={{ flex: 1, overflowY: 'auto' }}>
-          {/* User Profile Summary Card */}
+          {/* User Profile & About Summary Card */}
           <div
             style={{
               padding: '20px 18px',
               display: 'flex',
-              alignItems: 'center',
-              gap: '16px',
+              flexDirection: 'column',
+              gap: '14px',
               borderBottom: '8px solid #0c1317',
               backgroundColor: '#111b21',
             }}
           >
-            <img
-              src={getAvatarSrc(currentUser?.avtarImage) || 'https://api.dicebear.com/7.x/bottts/svg?seed=ChatNex'}
-              alt={currentUser?.username}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <img
+                src={getAvatarSrc(currentUser?.avtarImage) || 'https://api.dicebear.com/7.x/bottts/svg?seed=ChatNex'}
+                alt={currentUser?.username}
+                style={{
+                  width: '60px',
+                  height: '60px',
+                  borderRadius: '50%',
+                  objectFit: 'cover',
+                  border: '2px solid #00a884',
+                }}
+              />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <h4 style={{ margin: '0 0 4px 0', fontSize: '17px', color: '#e9edef' }}>
+                  {currentUser?.username}
+                </h4>
+                <p style={{ margin: 0, fontSize: '13px', color: '#8696a0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {currentUser?.email}
+                </p>
+              </div>
+            </div>
+
+            {/* About / Bio Status Box */}
+            <div
               style={{
-                width: '60px',
-                height: '60px',
-                borderRadius: '50%',
-                objectFit: 'cover',
-                border: '2px solid #00a884',
+                backgroundColor: '#202c33',
+                borderRadius: '8px',
+                padding: '12px 14px',
+                border: '1px solid rgba(255,255,255,0.06)',
               }}
-            />
-            <div>
-              <h4 style={{ margin: '0 0 4px 0', fontSize: '17px', color: '#e9edef' }}>
-                {currentUser?.username}
-              </h4>
-              <p style={{ margin: 0, fontSize: '13px', color: '#8696a0' }}>
-                {currentUser?.email}
-              </p>
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: isEditingAbout ? '10px' : '4px' }}>
+                <span style={{ fontSize: '11.5px', color: '#00a884', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  About / Bio
+                </span>
+                {!isEditingAbout ? (
+                  <EditIcon
+                    style={{ fontSize: '16px', color: '#8696a0', cursor: 'pointer' }}
+                    onClick={() => setIsEditingAbout(true)}
+                    titleAccess="Edit About description"
+                  />
+                ) : (
+                  <span
+                    onClick={() => setIsEditingAbout(false)}
+                    style={{ fontSize: '12px', color: '#8696a0', cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </span>
+                )}
+              </div>
+
+              {!isEditingAbout ? (
+                <div style={{ fontSize: '13.5px', color: '#e9edef', lineHeight: '1.4' }}>
+                  {aboutText || 'Hey there! I am using ChatNex.'}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <input
+                    type="text"
+                    maxLength={150}
+                    value={aboutText}
+                    onChange={(e) => setAboutText(e.target.value)}
+                    placeholder="Enter your status..."
+                    style={{
+                      width: '100%',
+                      padding: '8px 10px',
+                      backgroundColor: '#111b21',
+                      border: '1px solid #00a884',
+                      borderRadius: '6px',
+                      color: '#e9edef',
+                      fontSize: '13px',
+                      outline: 'none',
+                      boxSizing: 'border-box',
+                    }}
+                    autoFocus
+                  />
+
+                  {/* Preset quick status pills */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {[
+                      'Available 💬',
+                      'Busy 🔴',
+                      'At work 💻',
+                      'In a meeting 📅',
+                      'Only urgent calls 📞',
+                      'Hey there! I am using ChatNex.',
+                    ].map((preset, idx) => (
+                      <span
+                        key={idx}
+                        onClick={() => {
+                          setAboutText(preset);
+                          handleSaveAbout(preset);
+                        }}
+                        style={{
+                          fontSize: '11px',
+                          backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                          color: '#d1d7db',
+                          padding: '3px 8px',
+                          borderRadius: '12px',
+                          cursor: 'pointer',
+                          border: '1px solid rgba(255, 255, 255, 0.08)',
+                          transition: 'background 0.15s',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(0, 168, 132, 0.2)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)')}
+                      >
+                        {preset}
+                      </span>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSaveAbout()}
+                    disabled={isSavingAbout || !aboutText.trim()}
+                    style={{
+                      alignSelf: 'flex-end',
+                      padding: '6px 16px',
+                      backgroundColor: '#00a884',
+                      color: '#111b21',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '12.5px',
+                      fontWeight: '600',
+                      cursor: isSavingAbout || !aboutText.trim() ? 'not-allowed' : 'pointer',
+                      opacity: isSavingAbout || !aboutText.trim() ? 0.6 : 1,
+                    }}
+                  >
+                    {isSavingAbout ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -392,7 +555,7 @@ export default function SettingsDrawer({
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: '15px', color: '#e9edef' }}>Privacy</div>
               <div style={{ fontSize: '12.5px', color: '#8696a0' }}>
-                Last seen, read receipts, profile photo
+                Email, about, last seen, profile photo
               </div>
             </div>
           </div>
@@ -467,6 +630,52 @@ export default function SettingsDrawer({
       {/* Privacy Section */}
       {activeSection === 'privacy' && (
         <div style={{ flex: 1, overflowY: 'auto', padding: '18px 16px' }}>
+          {/* Email Privacy */}
+          <div style={{ marginBottom: '24px' }}>
+            <div style={{ fontSize: '13px', color: '#00a884', textTransform: 'uppercase', fontWeight: '600', marginBottom: '10px' }}>
+              Who can see my Email
+            </div>
+            {[
+              { id: 'everyone', label: 'Everyone' },
+              { id: 'contacts', label: 'My Contacts' },
+              { id: 'nobody', label: 'Nobody' },
+            ].map((opt) => (
+              <div
+                key={opt.id}
+                className={`radio-option ${privacySettings.email === opt.id ? 'selected' : ''}`}
+                onClick={() => handleUpdatePrivacy('email', opt.id)}
+              >
+                <span style={{ fontSize: '14px' }}>{opt.label}</span>
+                {privacySettings.email === opt.id && (
+                  <DoneIcon style={{ color: '#00a884', fontSize: '18px' }} />
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* About / Description Privacy */}
+          <div style={{ marginBottom: '24px' }}>
+            <div style={{ fontSize: '13px', color: '#00a884', textTransform: 'uppercase', fontWeight: '600', marginBottom: '10px' }}>
+              Who can see my About / Bio
+            </div>
+            {[
+              { id: 'everyone', label: 'Everyone' },
+              { id: 'contacts', label: 'My Contacts' },
+              { id: 'nobody', label: 'Nobody' },
+            ].map((opt) => (
+              <div
+                key={opt.id}
+                className={`radio-option ${privacySettings.about === opt.id ? 'selected' : ''}`}
+                onClick={() => handleUpdatePrivacy('about', opt.id)}
+              >
+                <span style={{ fontSize: '14px' }}>{opt.label}</span>
+                {privacySettings.about === opt.id && (
+                  <DoneIcon style={{ color: '#00a884', fontSize: '18px' }} />
+                )}
+              </div>
+            ))}
+          </div>
+
           {/* Last Seen */}
           <div style={{ marginBottom: '24px' }}>
             <div style={{ fontSize: '13px', color: '#00a884', textTransform: 'uppercase', fontWeight: '600', marginBottom: '10px' }}>
@@ -490,24 +699,6 @@ export default function SettingsDrawer({
             ))}
           </div>
 
-          {/* Read Receipts */}
-          <div style={{ marginBottom: '24px', padding: '16px', backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.05)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-              <span style={{ fontSize: '14.5px', fontWeight: '500', color: '#e9edef' }}>Read Receipts (Blue Ticks)</span>
-              <label className="chatnex-toggle">
-                <input
-                  type="checkbox"
-                  checked={privacySettings.readReceipts}
-                  onChange={(e) => handleUpdatePrivacy('readReceipts', e.target.checked)}
-                />
-                <span className="chatnex-toggle-slider"></span>
-              </label>
-            </div>
-            <p style={{ margin: 0, fontSize: '12px', color: '#8696a0', lineHeight: '1.4' }}>
-              If turned off, you won't send or receive Read receipts. Read receipts are always sent for group chats.
-            </p>
-          </div>
-
           {/* Profile Photo */}
           <div style={{ marginBottom: '24px' }}>
             <div style={{ fontSize: '13px', color: '#00a884', textTransform: 'uppercase', fontWeight: '600', marginBottom: '10px' }}>
@@ -529,6 +720,24 @@ export default function SettingsDrawer({
                 )}
               </div>
             ))}
+          </div>
+
+          {/* Read Receipts */}
+          <div style={{ marginBottom: '24px', padding: '16px', backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.05)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <span style={{ fontSize: '14.5px', fontWeight: '500', color: '#e9edef' }}>Read Receipts (Blue Ticks)</span>
+              <label className="chatnex-toggle">
+                <input
+                  type="checkbox"
+                  checked={privacySettings.readReceipts}
+                  onChange={(e) => handleUpdatePrivacy('readReceipts', e.target.checked)}
+                />
+                <span className="chatnex-toggle-slider"></span>
+              </label>
+            </div>
+            <p style={{ margin: 0, fontSize: '12px', color: '#8696a0', lineHeight: '1.4' }}>
+              If turned off, you won't send or receive Read receipts. Read receipts are always sent for group chats.
+            </p>
           </div>
         </div>
       )}

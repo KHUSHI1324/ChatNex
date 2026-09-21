@@ -30,18 +30,26 @@ module.exports.login=async(req,res,next)=>{
 
     try{
         const {username,password}=req.body;
-    const user=await User.findOne({username});
-    if(!user)
-    return res.json({msg:'Incorrect username',status:false});
+        if (!username || !password) {
+            return res.json({msg:'Invalid email or password',status:false});
+        }
+        const user=await User.findOne({
+            $or: [
+                { username: username.trim() },
+                { email: username.trim().toLowerCase() }
+            ]
+        });
+        if(!user)
+            return res.json({msg:'Invalid email or password',status:false});
 
-   const isPasswordValid=await bcrypt.compare(password,user.password);  
-  if(!isPasswordValid)
-  return res.json({msg: "Incorrect password",status:false});
-   delete user.password;
-   return res.json({status:true,user});
-}catch(ex){
-    next(ex);
- } };
+        const isPasswordValid=await bcrypt.compare(password,user.password);  
+        if(!isPasswordValid)
+            return res.json({msg: "Invalid email or password",status:false});
+        delete user.password;
+        return res.json({status:true,user});
+    }catch(ex){
+        next(ex);
+    } };
   module.exports.avtar=async(req,res,next)=>{
     try{
 const userId=req.params.id;
@@ -138,7 +146,11 @@ module.exports.getAllUsers=async(req,res,next)=>{
         const users=await User.find({_id:{$ne:req.params.id}}).select([
             "email",
             "username",
+            "about",
+            "privacySettings",
+            "savedContacts",
             "avtarImage",
+            "isAvtarImageSet",
             "_id",
         ]);
         return res.json(users);
@@ -151,6 +163,9 @@ module.exports.getContactsWithLastMessage = async (req, res, next) => {
     try {
         const currentUserId = new mongoose.Types.ObjectId(req.params.id);
         const currentUserIdStr = req.params.id.toString();
+
+        const currentUserDoc = await User.findById(currentUserId).select("savedContacts");
+        const savedContactIds = (currentUserDoc?.savedContacts || []).map(id => new mongoose.Types.ObjectId(id));
 
         const contacts = await User.aggregate([
             {
@@ -212,10 +227,21 @@ module.exports.getContactsWithLastMessage = async (req, res, next) => {
                 }
             },
             {
+                $match: {
+                    $or: [
+                        { lastMessageDoc: { $exists: true, $ne: null } },
+                        { _id: { $in: savedContactIds } }
+                    ]
+                }
+            },
+            {
                 $project: {
                     _id: 1,
                     username: 1,
                     email: 1,
+                    about: 1,
+                    privacySettings: 1,
+                    savedContacts: 1,
                     avtarImage: 1,
                     isAvtarImageSet: 1,
                     lastMessageDoc: 1,
@@ -293,6 +319,15 @@ module.exports.getContactsWithLastMessage = async (req, res, next) => {
                 _id: contact._id,
                 username: contact.username,
                 email: contact.email,
+                about: contact.about || "Hey there! I am using ChatNex.",
+                privacySettings: {
+                    lastSeen: contact.privacySettings?.lastSeen || 'everyone',
+                    readReceipts: contact.privacySettings?.readReceipts !== false,
+                    profilePhoto: contact.privacySettings?.profilePhoto || 'everyone',
+                    email: contact.privacySettings?.email || 'everyone',
+                    about: contact.privacySettings?.about || 'everyone'
+                },
+                savedContacts: contact.savedContacts || [],
                 avtarImage: contact.avtarImage,
                 isAvtarImageSet: contact.isAvtarImageSet,
                 latestMessage: {
@@ -308,6 +343,26 @@ module.exports.getContactsWithLastMessage = async (req, res, next) => {
         });
 
         return res.json(formattedContacts);
+    } catch (ex) {
+        next(ex);
+    }
+};
+
+module.exports.updateProfile = async (req, res, next) => {
+    try {
+        const { userId, username, about } = req.body;
+        const updateData = {};
+        if (about !== undefined) updateData.about = about;
+        if (username !== undefined && username.trim()) {
+            const existing = await User.findOne({ username: username.trim(), _id: { $ne: userId } });
+            if (existing) {
+                return res.json({ status: false, msg: "Username already in use" });
+            }
+            updateData.username = username.trim();
+        }
+        const user = await User.findByIdAndUpdate(userId, updateData, { new: true }).select("-password -passcode");
+        if (!user) return res.json({ status: false, msg: "User not found" });
+        return res.json({ status: true, user });
     } catch (ex) {
         next(ex);
     }
@@ -396,6 +451,66 @@ module.exports.verifyPasscode = async (req, res, next) => {
             return res.json({ status: false, msg: "Incorrect passcode PIN" });
         }
         return res.json({ status: true, msg: "Passcode verified" });
+    } catch (ex) {
+        next(ex);
+    }
+};
+
+module.exports.searchUsers = async (req, res, next) => {
+    try {
+        const { q, currentUserId } = req.query;
+        if (!q || q.trim() === '') {
+            return res.json([]);
+        }
+        const cleanQuery = q.trim();
+        const regex = new RegExp(cleanQuery, 'i');
+        
+        let filter = {
+            username: regex
+        };
+
+        if (currentUserId && mongoose.Types.ObjectId.isValid(currentUserId)) {
+            filter._id = { $ne: new mongoose.Types.ObjectId(currentUserId) };
+        }
+
+        const users = await User.find(filter)
+            .select("username avtarImage isAvtarImageSet about privacySettings _id")
+            .limit(20);
+
+        return res.json(users);
+    } catch (ex) {
+        next(ex);
+    }
+};
+
+module.exports.addContact = async (req, res, next) => {
+    try {
+        const { userId, contactId } = req.body;
+        if (!userId || !contactId) {
+            return res.json({ status: false, message: "User ID and Contact ID are required" });
+        }
+        await User.findByIdAndUpdate(
+            userId,
+            { $addToSet: { savedContacts: new mongoose.Types.ObjectId(contactId) } }
+        );
+        const addedContact = await User.findById(contactId).select(["_id", "username", "email", "about", "privacySettings", "savedContacts", "avtarImage", "isAvtarImageSet"]);
+        return res.json({ status: true, contact: addedContact, message: "Contact added successfully" });
+    } catch (ex) {
+        next(ex);
+    }
+};
+
+module.exports.removeContact = async (req, res, next) => {
+    try {
+        const { userId, contactId } = req.body;
+        if (!userId || !contactId) {
+            return res.json({ status: false, message: "User ID and Contact ID are required" });
+        }
+        await User.findByIdAndUpdate(
+            userId,
+            { $pull: { savedContacts: new mongoose.Types.ObjectId(contactId) } }
+        );
+        return res.json({ status: true, message: "Contact removed successfully" });
     } catch (ex) {
         next(ex);
     }

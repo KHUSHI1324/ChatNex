@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import Picker from 'emoji-picker-react';
+import EmojiPicker from 'emoji-picker-react';
 import { IoMdSend } from 'react-icons/io';
 import { BsEmojiSmileFill } from 'react-icons/bs';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
@@ -331,6 +331,7 @@ export default function ChatInput({
 
   useEffect(() => {
     const handleClickOutside = (event) => {
+      if (!event.target || !document.contains(event.target)) return;
       if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target)) {
         setShowEmojiPicker(false);
         setGifQuery('');
@@ -340,9 +341,11 @@ export default function ChatInput({
 
     if (showEmojiPicker) {
       document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('touchstart', handleClickOutside);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
     };
   }, [showEmojiPicker]);
 
@@ -758,28 +761,32 @@ export default function ChatInput({
               <BsEmojiSmileFill onClick={handleEmojiPickerHideShow} title="Emojis & GIFs" />
               {showEmojiPicker && (
                 <div
-                  className='emoji-picker-react'
+                  className='chatnex-emoji-gif-picker'
                   style={{
                     position: 'absolute',
-                    bottom: '45px',
+                    bottom: '52px',
                     left: '0px',
-                    zIndex: 1000,
+                    zIndex: 9999,
                     backgroundColor: '#202c33',
-                    borderRadius: '10px',
-                    boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: '12px',
+                    boxShadow: '0 8px 30px rgba(0,0,0,0.7)',
+                    border: '1px solid rgba(255,255,255,0.12)',
                     width: '320px',
                     display: 'flex',
                     flexDirection: 'column',
                     overflow: 'hidden',
                   }}
                 >
-                  {/* WhatsApp-Style Tab Bar */}
+                  {/* Modern Telegram/WhatsApp Segmented Pill Bar */}
                   <div
                     style={{
                       display: 'flex',
-                      backgroundColor: '#111b21',
-                      borderBottom: '1px solid rgba(255,255,255,0.1)',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      padding: '8px 12px',
+                      backgroundColor: '#182229',
+                      borderBottom: '1px solid rgba(255,255,255,0.08)',
                     }}
                   >
                     <button
@@ -787,48 +794,59 @@ export default function ChatInput({
                       onClick={() => setActiveTab("emoji")}
                       style={{
                         flex: 1,
-                        padding: '10px 0',
-                        backgroundColor: activeTab === "emoji" ? '#202c33' : 'transparent',
-                        color: activeTab === "emoji" ? '#00a884' : '#8696a0',
+                        padding: '6px 12px',
+                        backgroundColor: activeTab === "emoji" ? '#00a884' : 'transparent',
+                        color: activeTab === "emoji" ? '#111b21' : '#8696a0',
                         border: 'none',
-                        borderBottom: activeTab === "emoji" ? '2px solid #00a884' : '2px solid transparent',
-                        fontWeight: '600',
-                        fontSize: '13px',
+                        borderRadius: '16px',
+                        fontWeight: '700',
+                        fontSize: '12.5px',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         gap: '6px',
+                        transition: 'all 0.2s ease',
                       }}
                     >
-                      <span>😊</span> EMOJIS
+                      <span style={{ fontSize: '15px' }}>😊</span>
+                      <span>Emojis</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => setActiveTab("gif")}
                       style={{
                         flex: 1,
-                        padding: '10px 0',
-                        backgroundColor: activeTab === "gif" ? '#202c33' : 'transparent',
-                        color: activeTab === "gif" ? '#00a884' : '#8696a0',
+                        padding: '6px 12px',
+                        backgroundColor: activeTab === "gif" ? '#00a884' : 'transparent',
+                        color: activeTab === "gif" ? '#111b21' : '#8696a0',
                         border: 'none',
-                        borderBottom: activeTab === "gif" ? '2px solid #00a884' : '2px solid transparent',
-                        fontWeight: '600',
-                        fontSize: '13px',
+                        borderRadius: '16px',
+                        fontWeight: '700',
+                        fontSize: '12.5px',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         gap: '6px',
+                        transition: 'all 0.2s ease',
                       }}
                     >
-                      <span>👾</span> GIFs
+                      <span style={{ fontSize: '15px' }}>👾</span>
+                      <span>GIFs</span>
                     </button>
                   </div>
 
                   {/* Tab Content */}
                   {activeTab === "emoji" ? (
-                    <Picker onEmojiClick={handleEmojiClick} theme="dark" />
+                    <EmojiPicker
+                      onEmojiClick={handleEmojiClick}
+                      theme="dark"
+                      width="100%"
+                      height={370}
+                      previewConfig={{ showPreview: false }}
+                      lazyLoadEmojis={true}
+                    />
                   ) : (
                     <div
                       style={{

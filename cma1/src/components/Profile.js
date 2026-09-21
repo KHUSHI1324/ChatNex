@@ -6,9 +6,10 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import CloseIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import EditIcon from '@mui/icons-material/Edit';
 import CircularProgress from '@mui/material/CircularProgress';
 import axios from 'axios';
-import { AvtarRoute } from '../utils/APIRoutes';
+import { AvtarRoute, updateProfileRoute } from '../utils/APIRoutes';
 import { getAvatarSrc } from '../utils/avatarHelper';
 import { MODERN_AVATARS, generateCustomAiAvatar } from '../utils/avatarCollection';
 import Logout from './Logout';
@@ -19,6 +20,7 @@ export default function Profile({
   currentUserImage,
   email,
   onUpdateAvatar,
+  onUpdateCurrentUser,
 }) {
   const [showProfile, setShowProfile] = useState(false);
   const [isHoveringAvatar, setIsHoveringAvatar] = useState(false);
@@ -26,12 +28,23 @@ export default function Profile({
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [showAiModal, setShowAiModal] = useState(false);
 
+  // About status state
+  const [aboutText, setAboutText] = useState(currentUser?.about || 'Hey there! I am using ChatNex.');
+  const [isEditingAbout, setIsEditingAbout] = useState(false);
+  const [isSavingAbout, setIsSavingAbout] = useState(false);
+
   // AI Modal states
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiPreview, setAiPreview] = useState(null);
   const [selectedPreset, setSelectedPreset] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSavingAvatar, setIsSavingAvatar] = useState(false);
+
+  useEffect(() => {
+    if (currentUser?.about) {
+      setAboutText(currentUser.about);
+    }
+  }, [currentUser?.about]);
 
   const fileInputRef = useRef(null);
   const profileRef = useRef(null);
@@ -263,9 +276,107 @@ export default function Profile({
             <h3 style={{ margin: '0 0 4px 0', color: '#e9edef', fontSize: '17px', fontWeight: '600' }}>
               {currentUserName || 'User'}
             </h3>
-            <p style={{ margin: '0 0 14px 0', color: '#8696a0', fontSize: '12px' }}>
+            <p style={{ margin: '0 0 10px 0', color: '#8696a0', fontSize: '12px' }}>
               {email || 'user@chatnex.com'}
             </p>
+
+            {/* About / Status */}
+            <div
+              style={{
+                width: '100%',
+                backgroundColor: '#182229',
+                borderRadius: '8px',
+                padding: '8px 10px',
+                marginBottom: '14px',
+                border: '1px solid rgba(255,255,255,0.06)',
+                boxSizing: 'border-box',
+                textAlign: 'left',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                <span style={{ fontSize: '10.5px', color: '#00a884', fontWeight: '600', textTransform: 'uppercase' }}>
+                  About
+                </span>
+                {!isEditingAbout ? (
+                  <EditIcon
+                    style={{ fontSize: '14px', color: '#8696a0', cursor: 'pointer' }}
+                    onClick={() => setIsEditingAbout(true)}
+                    titleAccess="Edit status"
+                  />
+                ) : (
+                  <span
+                    onClick={() => setIsEditingAbout(false)}
+                    style={{ fontSize: '11px', color: '#8696a0', cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </span>
+                )}
+              </div>
+
+              {!isEditingAbout ? (
+                <div style={{ fontSize: '12px', color: '#d1d7db', lineHeight: '1.3', wordBreak: 'break-word' }}>
+                  {aboutText || 'Hey there! I am using ChatNex.'}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <input
+                    type="text"
+                    maxLength={150}
+                    value={aboutText}
+                    onChange={(e) => setAboutText(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '5px 8px',
+                      backgroundColor: '#111b21',
+                      border: '1px solid #00a884',
+                      borderRadius: '4px',
+                      color: '#e9edef',
+                      fontSize: '12px',
+                      outline: 'none',
+                      boxSizing: 'border-box',
+                    }}
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!aboutText.trim() || !currentUser?._id) return;
+                      setIsSavingAbout(true);
+                      try {
+                        const res = await axios.post(updateProfileRoute, {
+                          userId: currentUser._id,
+                          about: aboutText.trim(),
+                        });
+                        if (res.data?.status) {
+                          setIsEditingAbout(false);
+                          const updatedUser = { ...currentUser, about: aboutText.trim() };
+                          localStorage.setItem('chat-app-user', JSON.stringify(updatedUser));
+                          if (onUpdateCurrentUser) onUpdateCurrentUser(updatedUser);
+                        }
+                      } catch (err) {
+                        console.error('Error saving about:', err);
+                      } finally {
+                        setIsSavingAbout(false);
+                      }
+                    }}
+                    disabled={isSavingAbout}
+                    style={{
+                      alignSelf: 'flex-end',
+                      padding: '4px 12px',
+                      backgroundColor: '#00a884',
+                      color: '#111b21',
+                      border: 'none',
+                      borderRadius: '4px',
+                      fontSize: '11px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {isSavingAbout ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* Quick Actions: Upload Photo & AI Avatar Generator */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%', marginBottom: '14px' }}>

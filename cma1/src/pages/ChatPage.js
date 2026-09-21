@@ -282,8 +282,10 @@ function ChatPage() {
     const preview = formatPreviewMessage(msgText, imgpath, files);
 
     setContacts((prevContacts) => {
+      let found = false;
       const updatedContacts = prevContacts.map((contact) => {
         if (contact._id?.toString() === targetContactId?.toString()) {
+          found = true;
           return {
             ...contact,
             latestMessage: {
@@ -298,6 +300,21 @@ function ChatPage() {
         }
         return contact;
       });
+
+      if (!found && currentChatRef.current && currentChatRef.current._id?.toString() === targetContactId?.toString()) {
+        const newContactEntry = {
+          ...currentChatRef.current,
+          latestMessage: {
+            message: preview,
+            imgpath: imgpath,
+            files: files,
+            timestamp: timestamp,
+            sender: senderId,
+          },
+          lastMessageTimestamp: timestamp,
+        };
+        updatedContacts.unshift(newContactEntry);
+      }
 
       return [...updatedContacts].sort((a, b) => {
         const timeA = new Date(a.lastMessageTimestamp || 0).getTime();
@@ -1452,6 +1469,10 @@ function ChatPage() {
                 avtarImage: newImage,
               }));
             }}
+            onUpdateCurrentUser={(updated) => {
+              setCurrentUser(updated);
+              localStorage.setItem('chat-app-user', JSON.stringify(updated));
+            }}
           />
         </div>
       </div>
@@ -1492,6 +1513,10 @@ function ChatPage() {
               loading={loadingContacts}
               error={contactsError}
               onRetry={() => fetchContactsAndGroups(true)}
+              onContactAdded={(newContact) => {
+                setContacts((prev) => [newContact, ...prev.filter((c) => c._id !== newContact._id)]);
+                handleChatChange(newContact);
+              }}
             />
           )}
 

@@ -18,6 +18,11 @@ const userSchema = new mongoose.Schema({
         required: true,
         min: 5,
     },
+    about: {
+        type: String,
+        default: "Hey there! I am using ChatNex.",
+        max: 150,
+    },
     isAvtarImageSet: {
         type: Boolean,
     },
@@ -40,6 +45,16 @@ const userSchema = new mongoose.Schema({
             enum: ['everyone', 'contacts', 'nobody'],
             default: 'everyone',
         },
+        email: {
+            type: String,
+            enum: ['everyone', 'contacts', 'nobody'],
+            default: 'everyone',
+        },
+        about: {
+            type: String,
+            enum: ['everyone', 'contacts', 'nobody'],
+            default: 'everyone',
+        },
     },
     blockedUsers: [
         {
@@ -55,6 +70,12 @@ const userSchema = new mongoose.Schema({
         type: Boolean,
         default: false,
     },
+    savedContacts: [
+        {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "users",
+        }
+    ],
 });
 
 const UserModel = mongoose.models.users || mongoose.model("users", userSchema);
