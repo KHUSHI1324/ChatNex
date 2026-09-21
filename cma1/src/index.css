@@ -44,3 +44,19 @@ code {
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
 
+/* ChatNex Brand Logo Animations */
+.chatnex-brand-logo {
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.chatnex-brand-logo:hover .chatnex-logo-icon-wrapper {
+  transform: scale(1.08) translateY(-1px);
+  filter: drop-shadow(0 6px 14px rgba(0, 245, 160, 0.5));
+}
+
+.chatnex-brand-logo:active .chatnex-logo-icon-wrapper {
+  transform: scale(0.95);
+}
+
+

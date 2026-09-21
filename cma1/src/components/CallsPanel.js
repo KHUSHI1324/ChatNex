@@ -87,20 +87,23 @@ export default function CallsPanel({
       {/* Header */}
       <div
         style={{
-          height: '60px',
-          minHeight: '60px',
+          padding: '14px 16px 8px 16px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '0 16px',
           backgroundColor: '#111b21',
           borderBottom: '1px solid rgba(255,255,255,0.06)',
           boxSizing: 'border-box',
         }}
       >
-        <h2 style={{ margin: 0, color: '#e9edef', fontSize: '20px', fontWeight: '700', letterSpacing: '0.3px' }}>
-          Calls
-        </h2>
+        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }}>
+          <span style={{ color: '#00a884', fontWeight: '800', fontSize: '20px', letterSpacing: '-0.01em', lineHeight: '1.1' }}>
+            ChatNex
+          </span>
+          <span style={{ color: '#8696a0', fontSize: '17px', fontWeight: '600', letterSpacing: '0.2px', marginTop: '2px', lineHeight: '1.2' }}>
+            Calls
+          </span>
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {callLogs.length > 0 && (
             <button

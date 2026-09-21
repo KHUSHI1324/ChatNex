@@ -114,20 +114,22 @@ export default function Contacts({
       <div
         className='contacts-header'
         style={{
-          height: '60px',
-          minHeight: '60px',
+          padding: '14px 16px 2px 16px',
           display: 'flex',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           justifyContent: 'space-between',
-          padding: '0 16px',
           backgroundColor: '#111b21',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
           boxSizing: 'border-box',
         }}
       >
-        <h2 style={{ margin: 0, color: '#e9edef', fontSize: '20px', fontWeight: '700', letterSpacing: '0.3px' }}>
-          Chats
-        </h2>
+        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }}>
+          <span style={{ color: '#00a884', fontWeight: '800', fontSize: '20px', letterSpacing: '-0.01em', lineHeight: '1.1' }}>
+            ChatNex
+          </span>
+          <span style={{ color: '#8696a0', fontSize: '17px', fontWeight: '600', letterSpacing: '0.2px', marginTop: '2px', lineHeight: '1.2' }}>
+            Chats
+          </span>
+        </div>
       </div>
 
       {/* WhatsApp Search Input */}
@@ -364,8 +366,8 @@ export default function Contacts({
             const unread = (contact.unreadCount || 0) + (unreadMessages?.[contact._id] || 0);
             const latest = latestMessages[contact._id];
             const isOnline = !contact.isGroup && onlineUsers && (
-              onlineUsers instanceof Set 
-                ? onlineUsers.has(contact._id?.toString()) 
+              onlineUsers instanceof Set
+                ? onlineUsers.has(contact._id?.toString())
                 : Boolean(onlineUsers.get?.(contact._id?.toString()))
             );
 

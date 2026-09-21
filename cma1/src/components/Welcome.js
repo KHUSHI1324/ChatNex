@@ -78,7 +78,7 @@ export default function Welcome({ currentUser }) {
 
         {/* Typography */}
         <h1 className="welcome-title">
-          Welcome, <span>{username}!</span>
+          Welcome to <span style={{ color: '#00a884' }}>ChatNex</span>, {username}!
         </h1>
         <p className="welcome-subtitle">
           Send and receive messages with rich media, GIFs, voice and video calls.

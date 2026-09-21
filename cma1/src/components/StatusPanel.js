@@ -111,19 +111,23 @@ export default function StatusPanel({ currentUser, socket, showToast }) {
       {/* Header */}
       <div
         style={{
-          height: '60px',
-          backgroundColor: '#202c33',
+          padding: '14px 16px 8px 16px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '0 16px',
+          backgroundColor: '#202c33',
           borderBottom: '1px solid rgba(255,255,255,0.06)',
           flexShrink: 0,
         }}
       >
-        <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '500', color: '#e9edef' }}>
-          Status
-        </h3>
+        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }}>
+          <span style={{ color: '#00a884', fontWeight: '800', fontSize: '20px', letterSpacing: '-0.01em', lineHeight: '1.1' }}>
+            ChatNex
+          </span>
+          <span style={{ color: '#8696a0', fontSize: '17px', fontWeight: '600', letterSpacing: '0.2px', marginTop: '2px', lineHeight: '1.2' }}>
+            Status
+          </span>
+        </div>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
           <button
             onClick={() => setIsCreateModalOpen(true)}

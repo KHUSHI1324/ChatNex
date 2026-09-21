@@ -19,7 +19,7 @@ export default function Search({ contacts = [], changeChat }) {
   };
 
   return (
-    <div className='sidebar-search-container' style={{ padding: '8px 12px', backgroundColor: '#111b21' }}>
+    <div className='sidebar-search-container' style={{ padding: '4px 12px 6px 12px', backgroundColor: '#111b21' }}>
       <div
         className='search-pill-box'
         style={{

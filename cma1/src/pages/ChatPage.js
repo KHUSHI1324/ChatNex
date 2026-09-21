@@ -1290,19 +1290,20 @@ function ChatPage() {
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '18px', width: '100%' }}>
           {/* Logo / Brand Icon */}
           <div
+            title="ChatNex"
             style={{
               width: '36px',
               height: '36px',
-              borderRadius: '8px',
-              background: 'linear-gradient(135deg, #00a884, #008f6f)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: '#111b21',
-              boxShadow: '0 2px 8px rgba(0, 168, 132, 0.4)',
+              color: '#00a884',
+              cursor: 'pointer',
+              filter: 'drop-shadow(0 2px 6px rgba(0, 168, 132, 0.35))',
+              transition: 'all 0.2s ease',
             }}
           >
-            <FitbitIcon style={{ fontSize: '22px' }} />
+            <FitbitIcon style={{ fontSize: '28px' }} />
           </div>
 
           {/* Chats Action Tab */}

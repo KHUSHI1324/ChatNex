@@ -63,7 +63,7 @@ setValues({ ...values,[e.target.name]: e.target.value });
       <div className='formContainer'>
      <div className='formWrapper'>
        <form onSubmit={(e)=>handleSubmit(e)}>
-       <div className='logo'>ChatNex</div>
+        <div className='logo'>ChatNex</div>
         <div className='title'>Register</div>
         
             <input type='text' placeholder='DisplayName' name='username' onChange={(e)=>handleChange(e)}/>
