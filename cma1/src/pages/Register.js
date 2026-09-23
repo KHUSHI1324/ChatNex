@@ -40,7 +40,6 @@ function Register() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [serverError, setServerError] = useState('');
 
   const toastOptions = {
     position: 'top-right',
@@ -99,7 +98,6 @@ function Register() {
     const { name, value } = e.target;
     const updatedValues = { ...values, [name]: value };
     setValues(updatedValues);
-    setServerError(''); // Clear server error banner
 
     // Validate current field in real-time
     if (touched[name] || errors[name]) {
@@ -142,7 +140,6 @@ function Register() {
     if (!handleValidation()) return;
 
     setIsLoading(true);
-    setServerError('');
 
     try {
       const { password, username, email } = values;
@@ -154,9 +151,12 @@ function Register() {
 
       if (data.status === false) {
         toast.error(data.msg || 'Registration failed', toastOptions);
-        setServerError(data.msg || 'Registration failed');
       } else if (data.status === true) {
-        localStorage.setItem('chat-app-user', JSON.stringify(data.user));
+        if (data.token) {
+          localStorage.setItem('chat-app-token', data.token);
+        }
+        const userToSave = { ...data.user, token: data.token };
+        localStorage.setItem('chat-app-user', JSON.stringify(userToSave));
         toast.success('Account created successfully! Choose your avatar...', toastOptions);
         setTimeout(() => {
           navigate('/avtar');
@@ -165,7 +165,6 @@ function Register() {
     } catch (err) {
       console.error('Registration error:', err);
       toast.error('Registration failed. Please check your connection.', toastOptions);
-      setServerError('Registration failed. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -180,14 +179,6 @@ function Register() {
           <h1 className="auth-title">Create Account</h1>
           <p className="auth-subtitle">Join ChatNex to start messaging with friends</p>
         </div>
-
-        {/* Server Error Alert Banner */}
-        {serverError && (
-          <div className="auth-alert-banner">
-            <ErrorOutlineIcon style={{ fontSize: '18px' }} />
-            <span>{serverError}</span>
-          </div>
-        )}
 
         {/* Register Form */}
         <form onSubmit={handleSubmit} noValidate>

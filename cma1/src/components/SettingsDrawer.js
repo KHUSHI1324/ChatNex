@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import {
   updatePrivacySettingsRoute,
@@ -7,8 +8,10 @@ import {
   blockUserRoute,
   setPasscodeRoute,
   updateProfileRoute,
+  AvtarRoute,
 } from '../utils/APIRoutes';
 import { getAvatarSrc } from '../utils/avatarHelper';
+import { MODERN_AVATARS, generateCustomAiAvatar } from '../utils/avatarCollection';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SecurityIcon from '@mui/icons-material/Security';
 import LockIcon from '@mui/icons-material/Lock';
@@ -16,6 +19,19 @@ import BlockIcon from '@mui/icons-material/Block';
 import WallpaperIcon from '@mui/icons-material/Wallpaper';
 import DoneIcon from '@mui/icons-material/Done';
 import EditIcon from '@mui/icons-material/Edit';
+import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import CloseIcon from '@mui/icons-material/Close';
+import PersonIcon from '@mui/icons-material/Person';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import EmailIcon from '@mui/icons-material/Email';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import CircularProgress from '@mui/material/CircularProgress';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import ExitToAppIcon from '@mui/icons-material/ExitToApp';
+import AvatarStudioModal from './AvatarStudioModal';
 
 export default function SettingsDrawer({
   currentUser,
@@ -24,8 +40,44 @@ export default function SettingsDrawer({
   onUpdateCurrentUser,
   onLockAppNow,
   showToast,
+  initialSection = 'main',
 }) {
-  const [activeSection, setActiveSection] = useState('main'); // 'main' | 'profile' | 'privacy' | 'blocked' | 'passcode' | 'wallpaper'
+  const navigate = useNavigate();
+  const [activeSection, setActiveSection] = useState(initialSection || 'main'); // 'main' | 'profile' | 'privacy' | 'blocked' | 'passcode' | 'wallpaper'
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    if (initialSection) {
+      setActiveSection(initialSection);
+    }
+  }, [initialSection]);
+
+  const handleLogout = () => {
+    localStorage.clear();
+    sessionStorage.clear();
+    navigate('/login');
+  };
+
+  // Profile Username & About Editing
+  const [usernameText, setUsernameText] = useState(currentUser?.username || '');
+  const [isEditingUsername, setIsEditingUsername] = useState(false);
+  const [isSavingUsername, setIsSavingUsername] = useState(false);
+
+  const [aboutText, setAboutText] = useState(currentUser?.about || 'Hey there! I am using ChatNex.');
+  const [isEditingAbout, setIsEditingAbout] = useState(false);
+  const [isSavingAbout, setIsSavingAbout] = useState(false);
+
+  // Avatar Modal states
+  const [showAvatarPickerModal, setShowAvatarPickerModal] = useState(false);
+  const [avatarTab, setAvatarTab] = useState('all'); // 'all' | 'male' | 'female' | 'ai'
+  const [selectedAvatarImage, setSelectedAvatarImage] = useState(currentUser?.avtarImage || '');
+  const [isSavingAvatar, setIsSavingAvatar] = useState(false);
+
+  // AI Generator state in modal
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiGeneratedAvatar, setAiGeneratedAvatar] = useState(null);
+  const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+
   const [privacySettings, setPrivacySettings] = useState({
     lastSeen: currentUser?.privacySettings?.lastSeen || 'everyone',
     readReceipts: currentUser?.privacySettings?.readReceipts !== false,
@@ -34,11 +86,6 @@ export default function SettingsDrawer({
     about: currentUser?.privacySettings?.about || 'everyone',
   });
   const [isSavingPrivacy, setIsSavingPrivacy] = useState(false);
-
-  // Profile About / Status
-  const [aboutText, setAboutText] = useState(currentUser?.about || 'Hey there! I am using ChatNex.');
-  const [isEditingAbout, setIsEditingAbout] = useState(false);
-  const [isSavingAbout, setIsSavingAbout] = useState(false);
 
   // Blocked users
   const [blockedList, setBlockedList] = useState([]);
@@ -75,6 +122,8 @@ export default function SettingsDrawer({
     if (currentUser?._id) {
       fetchBlockedUsers();
       if (currentUser?.about) setAboutText(currentUser.about);
+      if (currentUser?.username) setUsernameText(currentUser.username);
+      if (currentUser?.avtarImage) setSelectedAvatarImage(currentUser.avtarImage);
       if (currentUser?.privacySettings) {
         setPrivacySettings({
           lastSeen: currentUser.privacySettings.lastSeen || 'everyone',
@@ -86,6 +135,96 @@ export default function SettingsDrawer({
       }
     }
   }, [currentUser, fetchBlockedUsers]);
+
+  const handleAvatarSelect = async (img) => {
+    if (!img || !currentUser?._id) return;
+    try {
+      setIsSavingAvatar(true);
+      const res = await axios.post(`${AvtarRoute}/${currentUser._id}`, {
+        image: img,
+      });
+      if (res.data?.isSet) {
+        const updatedUser = {
+          ...currentUser,
+          isAvtarImageSet: true,
+          avtarImage: res.data.image,
+        };
+        setSelectedAvatarImage(res.data.image);
+        onUpdateCurrentUser(updatedUser);
+        localStorage.setItem('chat-app-user', JSON.stringify(updatedUser));
+        showToast?.('success', 'Avatar Updated', 'Profile picture updated successfully.');
+        setShowAvatarPickerModal(false);
+      }
+    } catch (err) {
+      console.error('Error updating avatar:', err);
+      showToast?.('error', 'Update Failed', 'Failed to update profile picture.');
+    } finally {
+      setIsSavingAvatar(false);
+    }
+  };
+
+  const handleAvatarFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentUser?._id) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      await handleAvatarSelect(reader.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleGenerateAi = async (e) => {
+    if (e) e.preventDefault();
+    if (!aiPrompt.trim()) {
+      showToast?.('info', 'Prompt Required', 'Please enter a description for your AI avatar.');
+      return;
+    }
+
+    setIsGeneratingAi(true);
+    try {
+      const seed = currentUser?.username || currentUser?._id || aiPrompt;
+      const generated = await generateCustomAiAvatar(aiPrompt, '3d avatar', seed);
+      setAiGeneratedAvatar(generated);
+      setSelectedAvatarImage(generated);
+    } catch (err) {
+      console.error('Error generating AI avatar:', err);
+      showToast?.('error', 'AI Generation Failed', 'Could not generate avatar. Try a different prompt.');
+    } finally {
+      setIsGeneratingAi(false);
+    }
+  };
+
+  const handleSaveUsername = async () => {
+    const trimmed = usernameText.trim();
+    if (!trimmed || trimmed.length < 3) {
+      showToast?.('error', 'Invalid Name', 'Username must be at least 3 characters.');
+      return;
+    }
+    try {
+      setIsSavingUsername(true);
+      const res = await axios.post(updateProfileRoute, {
+        userId: currentUser._id,
+        username: trimmed,
+      });
+      if (res.data?.status) {
+        const updatedUser = {
+          ...currentUser,
+          username: trimmed,
+        };
+        onUpdateCurrentUser(updatedUser);
+        localStorage.setItem('chat-app-user', JSON.stringify(updatedUser));
+        setIsEditingUsername(false);
+        showToast?.('success', 'Profile Updated', 'Username updated successfully.');
+      } else {
+        showToast?.('error', 'Update Failed', res.data?.msg || 'Could not update username.');
+      }
+    } catch (err) {
+      console.error('Error updating username:', err);
+      showToast?.('error', 'Error', 'Failed to update username.');
+    } finally {
+      setIsSavingUsername(false);
+    }
+  };
 
   const handleUpdatePrivacy = async (key, val) => {
     const updated = { ...privacySettings, [key]: val };
@@ -354,6 +493,15 @@ export default function SettingsDrawer({
         }
       `}</style>
 
+      {/* Hidden File Input for local avatar photo uploads */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={handleAvatarFileUpload}
+      />
+
       {/* Drawer Header */}
       <div
         style={{
@@ -391,6 +539,7 @@ export default function SettingsDrawer({
         </button>
         <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '500', color: '#e9edef' }}>
           {activeSection === 'main' && 'Settings'}
+          {activeSection === 'profile' && 'Profile'}
           {activeSection === 'privacy' && 'Privacy'}
           {activeSection === 'blocked' && 'Blocked Contacts'}
           {activeSection === 'passcode' && 'App Lock & PIN'}
@@ -401,155 +550,85 @@ export default function SettingsDrawer({
       {/* Main Settings Menu */}
       {activeSection === 'main' && (
         <div style={{ flex: 1, overflowY: 'auto' }}>
-          {/* User Profile & About Summary Card */}
+          {/* User Profile & About Summary Card (Clickable to open full Profile editor) */}
           <div
+            onClick={() => setActiveSection('profile')}
+            title="Click to view and edit profile"
             style={{
-              padding: '20px 18px',
+              padding: '16px 18px',
               display: 'flex',
-              flexDirection: 'column',
-              gap: '14px',
+              alignItems: 'center',
+              gap: '16px',
               borderBottom: '8px solid #0c1317',
               backgroundColor: '#111b21',
+              cursor: 'pointer',
+              transition: 'background-color 0.15s',
             }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#111b21')}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <div style={{ position: 'relative' }}>
               <img
                 src={getAvatarSrc(currentUser?.avtarImage) || 'https://api.dicebear.com/7.x/bottts/svg?seed=ChatNex'}
                 alt={currentUser?.username}
                 style={{
-                  width: '60px',
-                  height: '60px',
+                  width: '64px',
+                  height: '64px',
                   borderRadius: '50%',
                   objectFit: 'cover',
-                  border: '2px solid #00a884',
+                  border: '2.5px solid #00a884',
+                  boxShadow: '0 4px 10px rgba(0, 168, 132, 0.25)',
                 }}
               />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <h4 style={{ margin: '0 0 4px 0', fontSize: '17px', color: '#e9edef' }}>
-                  {currentUser?.username}
-                </h4>
-                <p style={{ margin: 0, fontSize: '13px', color: '#8696a0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {currentUser?.email}
-                </p>
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: 0,
+                  right: 0,
+                  width: '22px',
+                  height: '22px',
+                  borderRadius: '50%',
+                  backgroundColor: '#00a884',
+                  color: '#111b21',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: '2px solid #111b21',
+                }}
+              >
+                <PhotoCameraIcon style={{ fontSize: '13px' }} />
               </div>
             </div>
-
-            {/* About / Bio Status Box */}
-            <div
-              style={{
-                backgroundColor: '#202c33',
-                borderRadius: '8px',
-                padding: '12px 14px',
-                border: '1px solid rgba(255,255,255,0.06)',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: isEditingAbout ? '10px' : '4px' }}>
-                <span style={{ fontSize: '11.5px', color: '#00a884', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  About / Bio
-                </span>
-                {!isEditingAbout ? (
-                  <EditIcon
-                    style={{ fontSize: '16px', color: '#8696a0', cursor: 'pointer' }}
-                    onClick={() => setIsEditingAbout(true)}
-                    titleAccess="Edit About description"
-                  />
-                ) : (
-                  <span
-                    onClick={() => setIsEditingAbout(false)}
-                    style={{ fontSize: '12px', color: '#8696a0', cursor: 'pointer' }}
-                  >
-                    Cancel
-                  </span>
-                )}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <h4 style={{ margin: '0 0 3px 0', fontSize: '17px', color: '#e9edef', fontWeight: '600' }}>
+                {currentUser?.username || 'User'}
+              </h4>
+              <p style={{ margin: '0 0 5px 0', fontSize: '13px', color: '#8696a0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {aboutText || 'Hey there! I am using ChatNex.'}
+              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#00a884', fontSize: '12px', fontWeight: '500' }}>
+                <span>Edit Profile & Avatar</span>
+                <ChevronRightIcon style={{ fontSize: '16px' }} />
               </div>
-
-              {!isEditingAbout ? (
-                <div style={{ fontSize: '13.5px', color: '#e9edef', lineHeight: '1.4' }}>
-                  {aboutText || 'Hey there! I am using ChatNex.'}
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <input
-                    type="text"
-                    maxLength={150}
-                    value={aboutText}
-                    onChange={(e) => setAboutText(e.target.value)}
-                    placeholder="Enter your status..."
-                    style={{
-                      width: '100%',
-                      padding: '8px 10px',
-                      backgroundColor: '#111b21',
-                      border: '1px solid #00a884',
-                      borderRadius: '6px',
-                      color: '#e9edef',
-                      fontSize: '13px',
-                      outline: 'none',
-                      boxSizing: 'border-box',
-                    }}
-                    autoFocus
-                  />
-
-                  {/* Preset quick status pills */}
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                    {[
-                      'Available 💬',
-                      'Busy 🔴',
-                      'At work 💻',
-                      'In a meeting 📅',
-                      'Only urgent calls 📞',
-                      'Hey there! I am using ChatNex.',
-                    ].map((preset, idx) => (
-                      <span
-                        key={idx}
-                        onClick={() => {
-                          setAboutText(preset);
-                          handleSaveAbout(preset);
-                        }}
-                        style={{
-                          fontSize: '11px',
-                          backgroundColor: 'rgba(255, 255, 255, 0.06)',
-                          color: '#d1d7db',
-                          padding: '3px 8px',
-                          borderRadius: '12px',
-                          cursor: 'pointer',
-                          border: '1px solid rgba(255, 255, 255, 0.08)',
-                          transition: 'background 0.15s',
-                        }}
-                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(0, 168, 132, 0.2)')}
-                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)')}
-                      >
-                        {preset}
-                      </span>
-                    ))}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => handleSaveAbout()}
-                    disabled={isSavingAbout || !aboutText.trim()}
-                    style={{
-                      alignSelf: 'flex-end',
-                      padding: '6px 16px',
-                      backgroundColor: '#00a884',
-                      color: '#111b21',
-                      border: 'none',
-                      borderRadius: '6px',
-                      fontSize: '12.5px',
-                      fontWeight: '600',
-                      cursor: isSavingAbout || !aboutText.trim() ? 'not-allowed' : 'pointer',
-                      opacity: isSavingAbout || !aboutText.trim() ? 0.6 : 1,
-                    }}
-                  >
-                    {isSavingAbout ? 'Saving...' : 'Save'}
-                  </button>
-                </div>
-              )}
             </div>
           </div>
 
           {/* Settings Items */}
+          <div className="settings-item" onClick={() => setActiveSection('profile')}>
+            <div style={{ color: '#00a884', marginRight: '16px', display: 'flex', alignItems: 'center' }}>
+              <PersonIcon />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '15px', color: '#e9edef' }}>Profile & Avatar</div>
+              <div style={{ fontSize: '12.5px', color: '#8696a0' }}>
+                Change photo, 3D avatars, name, about
+              </div>
+            </div>
+            <ChevronRightIcon style={{ color: '#8696a0', fontSize: '20px' }} />
+          </div>
+
           <div className="settings-item" onClick={() => setActiveSection('privacy')}>
-            <div style={{ color: '#00a884', marginRight: '16px' }}>
+            <div style={{ color: '#00a884', marginRight: '16px', display: 'flex', alignItems: 'center' }}>
               <SecurityIcon />
             </div>
             <div style={{ flex: 1 }}>
@@ -558,10 +637,11 @@ export default function SettingsDrawer({
                 Email, about, last seen, profile photo
               </div>
             </div>
+            <ChevronRightIcon style={{ color: '#8696a0', fontSize: '20px' }} />
           </div>
 
           <div className="settings-item" onClick={() => setActiveSection('blocked')}>
-            <div style={{ color: '#f15c6d', marginRight: '16px' }}>
+            <div style={{ color: '#f15c6d', marginRight: '16px', display: 'flex', alignItems: 'center' }}>
               <BlockIcon />
             </div>
             <div style={{ flex: 1 }}>
@@ -570,10 +650,11 @@ export default function SettingsDrawer({
                 {blockedList.length} contacts blocked
               </div>
             </div>
+            <ChevronRightIcon style={{ color: '#8696a0', fontSize: '20px' }} />
           </div>
 
           <div className="settings-item" onClick={() => setActiveSection('passcode')}>
-            <div style={{ color: '#00a884', marginRight: '16px' }}>
+            <div style={{ color: '#00a884', marginRight: '16px', display: 'flex', alignItems: 'center' }}>
               <LockIcon />
             </div>
             <div style={{ flex: 1 }}>
@@ -582,10 +663,11 @@ export default function SettingsDrawer({
                 {currentUser?.isPasscodeEnabled ? 'Enabled with 4-digit PIN' : 'Disabled'}
               </div>
             </div>
+            <ChevronRightIcon style={{ color: '#8696a0', fontSize: '20px' }} />
           </div>
 
           <div className="settings-item" onClick={() => setActiveSection('wallpaper')}>
-            <div style={{ color: '#53bdeb', marginRight: '16px' }}>
+            <div style={{ color: '#53bdeb', marginRight: '16px', display: 'flex', alignItems: 'center' }}>
               <WallpaperIcon />
             </div>
             <div style={{ flex: 1 }}>
@@ -594,11 +676,12 @@ export default function SettingsDrawer({
                 Custom themes & backgrounds
               </div>
             </div>
+            <ChevronRightIcon style={{ color: '#8696a0', fontSize: '20px' }} />
           </div>
 
           {/* Quick App Lock Action if PIN is enabled */}
           {currentUser?.isPasscodeEnabled && (
-            <div style={{ padding: '24px 18px' }}>
+            <div style={{ padding: '24px 18px 10px 18px' }}>
               <button
                 type="button"
                 onClick={onLockAppNow}
@@ -624,6 +707,368 @@ export default function SettingsDrawer({
               </button>
             </div>
           )}
+
+          {/* Log Out Item */}
+          <div
+            className="settings-item"
+            onClick={handleLogout}
+            style={{ marginTop: '8px', borderTop: '6px solid #0c1317' }}
+          >
+            <div style={{ color: '#ea4335', marginRight: '16px', display: 'flex', alignItems: 'center' }}>
+              <ExitToAppIcon />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '15px', color: '#ea4335', fontWeight: '600' }}>Log Out</div>
+              <div style={{ fontSize: '12.5px', color: '#8696a0' }}>
+                Sign out of your ChatNex account
+              </div>
+            </div>
+            <ChevronRightIcon style={{ color: '#8696a0', fontSize: '20px' }} />
+          </div>
+        </div>
+      )}
+
+      {/* Profile & Avatar Editing Section */}
+      {activeSection === 'profile' && (
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Avatar Display & Quick Actions */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}>
+            <div
+              style={{
+                position: 'relative',
+                width: '110px',
+                height: '110px',
+                borderRadius: '50%',
+                cursor: 'pointer',
+              }}
+              onClick={() => setShowAvatarPickerModal(true)}
+              title="Click to change profile picture or select avatar"
+            >
+              <img
+                src={getAvatarSrc(currentUser?.avtarImage) || 'https://api.dicebear.com/7.x/bottts/svg?seed=ChatNex'}
+                alt={currentUser?.username}
+                style={{
+                  width: '110px',
+                  height: '110px',
+                  borderRadius: '50%',
+                  objectFit: 'cover',
+                  border: '3px solid #00a884',
+                  boxShadow: '0 6px 16px rgba(0, 168, 132, 0.3)',
+                }}
+              />
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  borderRadius: '50%',
+                  backgroundColor: 'rgba(0,0,0,0.5)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#fff',
+                  opacity: 0,
+                  transition: 'opacity 0.2s',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.opacity = 1)}
+                onMouseLeave={(e) => (e.currentTarget.style.opacity = 0)}
+              >
+                <PhotoCameraIcon style={{ fontSize: '26px' }} />
+                <span style={{ fontSize: '11px', marginTop: '2px', fontWeight: '500' }}>Change</span>
+              </div>
+            </div>
+
+            {/* Avatar Action Pills */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center', width: '100%' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setAvatarTab('all');
+                  setShowAvatarPickerModal(true);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '7px 12px',
+                  backgroundColor: 'rgba(0, 168, 132, 0.15)',
+                  border: '1px solid rgba(0, 168, 132, 0.35)',
+                  borderRadius: '20px',
+                  color: '#00a884',
+                  fontSize: '12.5px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                }}
+              >
+                <AutoAwesomeIcon style={{ fontSize: '15px' }} /> Choose 3D Avatar
+              </button>
+
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '7px 12px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '20px',
+                  color: '#e9edef',
+                  fontSize: '12.5px',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                }}
+              >
+                <PhotoCameraIcon style={{ fontSize: '15px', color: '#8696a0' }} /> Upload Photo
+              </button>
+            </div>
+          </div>
+
+          {/* Username / Name Card */}
+          <div
+            style={{
+              backgroundColor: '#202c33',
+              borderRadius: '10px',
+              padding: '14px 16px',
+              border: '1px solid rgba(255, 255, 255, 0.06)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#00a884', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                <PersonIcon style={{ fontSize: '16px' }} /> Your Name
+              </div>
+              {!isEditingUsername ? (
+                <EditIcon
+                  style={{ fontSize: '16px', color: '#8696a0', cursor: 'pointer' }}
+                  onClick={() => setIsEditingUsername(true)}
+                  titleAccess="Edit name"
+                />
+              ) : (
+                <span
+                  onClick={() => {
+                    setUsernameText(currentUser?.username || '');
+                    setIsEditingUsername(false);
+                  }}
+                  style={{ fontSize: '12px', color: '#8696a0', cursor: 'pointer' }}
+                >
+                  Cancel
+                </span>
+              )}
+            </div>
+
+            {!isEditingUsername ? (
+              <div style={{ fontSize: '15px', color: '#e9edef', fontWeight: '500' }}>
+                {currentUser?.username || 'User'}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                <input
+                  type="text"
+                  value={usernameText}
+                  onChange={(e) => setUsernameText(e.target.value)}
+                  style={{
+                    flex: 1,
+                    padding: '8px 10px',
+                    backgroundColor: '#111b21',
+                    border: '1px solid #00a884',
+                    borderRadius: '6px',
+                    color: '#e9edef',
+                    fontSize: '13.5px',
+                    outline: 'none',
+                  }}
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveUsername}
+                  disabled={isSavingUsername || !usernameText.trim()}
+                  style={{
+                    padding: '8px 14px',
+                    backgroundColor: '#00a884',
+                    color: '#111b21',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '12.5px',
+                    fontWeight: '600',
+                    cursor: isSavingUsername || !usernameText.trim() ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {isSavingUsername ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            )}
+            <p style={{ margin: '8px 0 0 0', fontSize: '11.5px', color: '#8696a0', lineHeight: '1.4' }}>
+              This is the name visible to your contacts and in group chats.
+            </p>
+          </div>
+
+          {/* About / Bio Card */}
+          <div
+            style={{
+              backgroundColor: '#202c33',
+              borderRadius: '10px',
+              padding: '14px 16px',
+              border: '1px solid rgba(255, 255, 255, 0.06)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#00a884', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                <InfoOutlinedIcon style={{ fontSize: '16px' }} /> About / Bio
+              </div>
+              {!isEditingAbout ? (
+                <EditIcon
+                  style={{ fontSize: '16px', color: '#8696a0', cursor: 'pointer' }}
+                  onClick={() => setIsEditingAbout(true)}
+                  titleAccess="Edit status"
+                />
+              ) : (
+                <span
+                  onClick={() => setIsEditingAbout(false)}
+                  style={{ fontSize: '12px', color: '#8696a0', cursor: 'pointer' }}
+                >
+                  Cancel
+                </span>
+              )}
+            </div>
+
+            {!isEditingAbout ? (
+              <div style={{ fontSize: '14px', color: '#e9edef', lineHeight: '1.4' }}>
+                {aboutText || 'Hey there! I am using ChatNex.'}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <input
+                  type="text"
+                  maxLength={150}
+                  value={aboutText}
+                  onChange={(e) => setAboutText(e.target.value)}
+                  placeholder="Enter your status..."
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    backgroundColor: '#111b21',
+                    border: '1px solid #00a884',
+                    borderRadius: '6px',
+                    color: '#e9edef',
+                    fontSize: '13px',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                  autoFocus
+                />
+
+                {/* Preset quick status pills */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {[
+                    'Available 💬',
+                    'Busy 🔴',
+                    'At work 💻',
+                    'In a meeting 📅',
+                    'Only urgent calls 📞',
+                    'Hey there! I am using ChatNex.',
+                  ].map((preset, idx) => (
+                    <span
+                      key={idx}
+                      onClick={() => {
+                        setAboutText(preset);
+                        handleSaveAbout(preset);
+                      }}
+                      style={{
+                        fontSize: '11px',
+                        backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                        color: '#d1d7db',
+                        padding: '3px 8px',
+                        borderRadius: '12px',
+                        cursor: 'pointer',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        transition: 'background 0.15s',
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(0, 168, 132, 0.2)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)')}
+                    >
+                      {preset}
+                    </span>
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleSaveAbout()}
+                  disabled={isSavingAbout || !aboutText.trim()}
+                  style={{
+                    alignSelf: 'flex-end',
+                    padding: '6px 16px',
+                    backgroundColor: '#00a884',
+                    color: '#111b21',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '12.5px',
+                    fontWeight: '600',
+                    cursor: isSavingAbout || !aboutText.trim() ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {isSavingAbout ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Email Address Card */}
+          <div
+            style={{
+              backgroundColor: '#202c33',
+              borderRadius: '10px',
+              padding: '14px 16px',
+              border: '1px solid rgba(255, 255, 255, 0.06)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#00a884', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>
+              <EmailIcon style={{ fontSize: '16px' }} /> Email Address
+            </div>
+            <div style={{ fontSize: '14px', color: '#e9edef' }}>
+              {currentUser?.email || 'N/A'}
+            </div>
+            <p style={{ margin: '6px 0 0 0', fontSize: '11.5px', color: '#8696a0' }}>
+              Your account email is verified and protected.
+            </p>
+          </div>
+
+          {/* Log Out Button */}
+          <div style={{ marginTop: '8px', marginBottom: '16px' }}>
+            <button
+              type="button"
+              onClick={handleLogout}
+              style={{
+                width: '100%',
+                padding: '12px',
+                backgroundColor: 'rgba(234, 67, 53, 0.12)',
+                border: '1px solid rgba(234, 67, 53, 0.35)',
+                borderRadius: '8px',
+                color: '#ea4335',
+                fontSize: '14px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = '#ea4335';
+                e.currentTarget.style.color = '#ffffff';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(234, 67, 53, 0.12)';
+                e.currentTarget.style.color = '#ea4335';
+              }}
+            >
+              <ExitToAppIcon style={{ fontSize: '18px' }} />
+              Log Out
+            </button>
+          </div>
         </div>
       )}
 
@@ -1012,6 +1457,21 @@ export default function SettingsDrawer({
             ))}
           </div>
         </div>
+      )}
+
+      {/* Comprehensive Avatar Studio Modal */}
+      {showAvatarPickerModal && (
+        <AvatarStudioModal
+          isOpen={showAvatarPickerModal}
+          onClose={() => setShowAvatarPickerModal(false)}
+          currentImage={currentUser?.avtarImage}
+          title="Avatar Studio"
+          subtitle="Choose a modern 3D vector avatar, generate with AI, or upload your photo"
+          saveButtonText="Set as DP & Save"
+          isSaving={isSavingAvatar}
+          showToast={showToast}
+          onSelectAvatar={handleAvatarSelect}
+        />
       )}
     </div>
   );

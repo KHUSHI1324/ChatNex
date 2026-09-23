@@ -29,6 +29,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos';
 import { getAvatarSrc } from '../utils/avatarHelper';
 import { blockUserRoute, unblockUserRoute, host } from '../utils/APIRoutes';
+import AvatarStudioModal from './AvatarStudioModal';
 
 const resolveMediaUrl = (url) => {
   if (!url) return '';
@@ -72,6 +73,7 @@ export default function ChatInfoDrawer({
   // Sub-view: 'main' | 'media_view'
   const [activeSubView, setActiveSubView] = useState('main');
   const [mediaActiveTab, setMediaActiveTab] = useState('media'); // 'media' | 'docs' | 'links'
+  const [showGroupAvatarStudio, setShowGroupAvatarStudio] = useState(false);
   const [previewMediaModal, setPreviewMediaModal] = useState(null); // image/video preview
 
   // Edit Modals
@@ -823,11 +825,11 @@ export default function ChatInfoDrawer({
               onMouseEnter={() => canEditGroupInfo && setIsHoveringAvatar(true)}
               onMouseLeave={() => setIsHoveringAvatar(false)}
               onClick={() => {
-                if (canEditGroupInfo && fileInputRef.current) {
-                  fileInputRef.current.click();
+                if (canEditGroupInfo) {
+                  setShowGroupAvatarStudio(true);
                 }
               }}
-              title={canEditGroupInfo ? 'Click to change group picture' : undefined}
+              title={canEditGroupInfo ? 'Click to change group avatar & picture' : undefined}
             >
               <img
                 src={getAvatarSrc(chat.avtarImage)}
@@ -2931,6 +2933,25 @@ export default function ChatInfoDrawer({
             </div>
           </div>
         </div>
+      )}
+      {/* Group Avatar Studio Modal */}
+      {isGroup && showGroupAvatarStudio && (
+        <AvatarStudioModal
+          isOpen={showGroupAvatarStudio}
+          onClose={() => setShowGroupAvatarStudio(false)}
+          currentImage={chat.avtarImage}
+          title="Group Avatar Studio"
+          subtitle="Choose a 3D icon, generate a group badge with AI, or upload a photo"
+          saveButtonText="Set as Group DP"
+          showToast={showToast}
+          onSelectAvatar={(newImg) => {
+            if (onUpdateGroupAvatar && isGroup) {
+              onUpdateGroupAvatar(chat._id, newImg);
+              showToast?.('success', 'Group Photo Updated', 'Group picture changed successfully.');
+            }
+            setShowGroupAvatarStudio(false);
+          }}
+        />
       )}
     </div>
   );

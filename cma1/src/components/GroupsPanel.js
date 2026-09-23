@@ -4,9 +4,11 @@ import GroupAddIcon from '@mui/icons-material/GroupAdd';
 import GroupsIcon from '@mui/icons-material/Groups';
 import SearchIcon from '@mui/icons-material/Search';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
 import CircularProgress from '@mui/material/CircularProgress';
 import { createGroupRoute } from '../utils/APIRoutes';
 import { getAvatarSrc } from '../utils/avatarHelper';
+import AvatarStudioModal from './AvatarStudioModal';
 
 export default function GroupsPanel({
   contacts = [],
@@ -19,6 +21,8 @@ export default function GroupsPanel({
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [groupName, setGroupName] = useState('');
+  const [groupAvatar, setGroupAvatar] = useState('');
+  const [showGroupAvatarStudio, setShowGroupAvatarStudio] = useState(false);
   const [selectedMembers, setSelectedMembers] = useState([]);
   const [memberSearchQuery, setMemberSearchQuery] = useState('');
   const [isCreating, setIsCreating] = useState(false);
@@ -41,6 +45,7 @@ export default function GroupsPanel({
         name: groupName.trim(),
         members: selectedMembers,
         admin: currentUser._id,
+        groupImage: groupAvatar || undefined,
       };
 
       const response = await axios.post(createGroupRoute, payload);
@@ -67,6 +72,7 @@ export default function GroupsPanel({
       });
 
       setGroupName('');
+      setGroupAvatar('');
       setSelectedMembers([]);
       setMemberSearchQuery('');
     } catch (err) {
@@ -528,6 +534,58 @@ export default function GroupsPanel({
             </div>
 
             <form onSubmit={handleCreateGroup}>
+              {/* Group Avatar Picker */}
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+                <div
+                  onClick={() => setShowGroupAvatarStudio(true)}
+                  style={{
+                    position: 'relative',
+                    width: '76px',
+                    height: '76px',
+                    borderRadius: '50%',
+                    cursor: 'pointer',
+                    border: '2.5px solid #00a884',
+                    backgroundColor: '#111b21',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 4px 12px rgba(0, 168, 132, 0.3)',
+                    transition: 'transform 0.15s',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.05)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+                  title="Click to choose 3D avatar, create with AI, or upload group picture"
+                >
+                  {groupAvatar ? (
+                    <img
+                      src={getAvatarSrc(groupAvatar)}
+                      alt="Group Avatar"
+                      style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                    />
+                  ) : (
+                    <GroupsIcon style={{ fontSize: '38px', color: '#00a884' }} />
+                  )}
+                  <div
+                    style={{
+                      position: 'absolute',
+                      bottom: '-2px',
+                      right: '-2px',
+                      backgroundColor: '#00a884',
+                      color: '#111b21',
+                      borderRadius: '50%',
+                      width: '24px',
+                      height: '24px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      border: '2px solid #202c33',
+                    }}
+                  >
+                    <PhotoCameraIcon style={{ fontSize: '14px' }} />
+                  </div>
+                </div>
+              </div>
+
               {/* Group Name Input */}
               <div style={{ marginBottom: '14px' }}>
                 <label style={{ color: '#8696a0', fontSize: '12px', display: 'block', marginBottom: '6px' }}>
@@ -610,26 +668,57 @@ export default function GroupsPanel({
                           style={{
                             display: 'flex',
                             alignItems: 'center',
-                            gap: '10px',
-                            padding: '6px 8px',
-                            borderRadius: '4px',
+                            gap: '12px',
+                            padding: '8px 10px',
+                            borderRadius: '8px',
                             cursor: 'pointer',
-                            backgroundColor: isSelected ? 'rgba(0,168,132,0.2)' : 'transparent',
-                            transition: 'background 0.1s',
+                            backgroundColor: isSelected ? 'rgba(0,168,132,0.15)' : 'transparent',
+                            transition: 'all 0.15s ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!isSelected) e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent';
                           }}
                         >
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => {}}
-                            style={{ accentColor: '#00a884', cursor: 'pointer' }}
-                          />
+                          {/* Modern WhatsApp Circle Checkbox */}
+                          <div
+                            style={{
+                              width: '20px',
+                              height: '20px',
+                              borderRadius: '50%',
+                              backgroundColor: isSelected ? '#00a884' : 'transparent',
+                              border: isSelected ? '2px solid #00a884' : '2px solid rgba(255, 255, 255, 0.25)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              flexShrink: 0,
+                              boxShadow: isSelected ? '0 0 8px rgba(0,168,132,0.4)' : 'none',
+                              transition: 'all 0.15s ease',
+                            }}
+                          >
+                            {isSelected && (
+                              <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                                <path d="M2 6l3 3 5-5" stroke="#111b21" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            )}
+                          </div>
                           <img
                             src={getAvatarSrc(c.avtarImage)}
                             alt={c.username}
-                            style={{ width: '30px', height: '30px', borderRadius: '50%' }}
+                            style={{ width: '34px', height: '34px', borderRadius: '50%', objectFit: 'cover', border: isSelected ? '1.5px solid #00a884' : '1.5px solid rgba(255,255,255,0.1)' }}
                           />
-                          <span style={{ color: '#e9edef', fontSize: '13.5px', flex: 1 }}>{c.username}</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ color: '#e9edef', fontSize: '13.5px', fontWeight: isSelected ? '600' : '400', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {c.username}
+                            </div>
+                            {c.email && (
+                              <div style={{ color: '#8696a0', fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {c.email}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       );
                     })
@@ -648,11 +737,12 @@ export default function GroupsPanel({
                   onClick={() => setShowCreateModal(false)}
                   disabled={isCreating}
                   style={{
-                    backgroundColor: 'transparent',
-                    border: '1px solid rgba(255,255,255,0.2)',
-                    color: '#8696a0',
                     padding: '8px 16px',
+                    backgroundColor: 'transparent',
+                    border: '1px solid rgba(255,255,255,0.15)',
                     borderRadius: '6px',
+                    color: '#8696a0',
+                    fontSize: '13px',
                     cursor: 'pointer',
                   }}
                 >
@@ -662,17 +752,17 @@ export default function GroupsPanel({
                   type="submit"
                   disabled={isCreating || !groupName.trim()}
                   style={{
+                    padding: '8px 20px',
                     backgroundColor: '#00a884',
                     border: 'none',
-                    color: '#111b21',
-                    fontWeight: 'bold',
-                    padding: '8px 18px',
                     borderRadius: '6px',
+                    color: '#111b21',
+                    fontSize: '13.5px',
+                    fontWeight: '600',
                     cursor: isCreating || !groupName.trim() ? 'not-allowed' : 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '6px',
-                    opacity: isCreating || !groupName.trim() ? 0.7 : 1,
                   }}
                 >
                   {isCreating ? <CircularProgress size={16} style={{ color: '#111b21' }} /> : null}
@@ -682,6 +772,22 @@ export default function GroupsPanel({
             </form>
           </div>
         </div>
+      )}
+
+      {/* Group Avatar Studio Modal */}
+      {showGroupAvatarStudio && (
+        <AvatarStudioModal
+          isOpen={showGroupAvatarStudio}
+          onClose={() => setShowGroupAvatarStudio(false)}
+          currentImage={groupAvatar}
+          title="Group Avatar Studio"
+          subtitle="Choose a 3D icon, generate with AI, or upload a custom group picture"
+          saveButtonText="Select for Group"
+          onSelectAvatar={(img) => {
+            setGroupAvatar(img);
+            setShowGroupAvatarStudio(false);
+          }}
+        />
       )}
 
       {/* In-App Error Popup Modal */}

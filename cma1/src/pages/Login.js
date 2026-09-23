@@ -32,7 +32,6 @@ function Login() {
 
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [authError, setAuthError] = useState('');
 
   const toastOptions = {
     position: 'top-right',
@@ -62,8 +61,6 @@ function Login() {
     } else if (name === 'password') {
       if (!value) {
         errorMsg = 'Password is required';
-      } else if (value.length < 5) {
-        errorMsg = 'Password must be at least 5 characters';
       }
     }
 
@@ -74,9 +71,8 @@ function Login() {
   const handleChange = (e) => {
     const { name, value } = e.target;
     setValues((prev) => ({ ...prev, [name]: value }));
-    setAuthError(''); // Clear server-level auth error on typing
 
-    // Validate in real-time: if field is touched or previously errored, validate immediately
+    // Validate current field in real-time
     if (touched[name] || errors[name]) {
       validateField(name, value);
     }
@@ -108,7 +104,6 @@ function Login() {
     if (!handleValidation()) return;
 
     setIsLoading(true);
-    setAuthError('');
 
     try {
       const { username, password } = values;
@@ -121,9 +116,12 @@ function Login() {
         // Always display generic "Invalid email or password" as requested
         const genericMsg = 'Invalid email or password';
         toast.error(genericMsg, toastOptions);
-        setAuthError(genericMsg);
       } else if (data.status === true) {
-        localStorage.setItem('chat-app-user', JSON.stringify(data.user));
+        if (data.token) {
+          localStorage.setItem('chat-app-token', data.token);
+        }
+        const userToSave = { ...data.user, token: data.token };
+        localStorage.setItem('chat-app-user', JSON.stringify(userToSave));
         toast.success('Login successful! Redirecting...', toastOptions);
         setTimeout(() => {
           navigate('/');
@@ -133,7 +131,6 @@ function Login() {
       console.error('Login error:', err);
       const genericMsg = 'Invalid email or password';
       toast.error(genericMsg, toastOptions);
-      setAuthError(genericMsg);
     } finally {
       setIsLoading(false);
     }
@@ -148,14 +145,6 @@ function Login() {
           <h1 className="auth-title">Welcome Back</h1>
           <p className="auth-subtitle">Sign in with your username or email to continue</p>
         </div>
-
-        {/* Generic Auth Error Alert */}
-        {authError && (
-          <div className="auth-alert-banner">
-            <ErrorOutlineIcon style={{ fontSize: '18px' }} />
-            <span>{authError}</span>
-          </div>
-        )}
 
         {/* Login Form */}
         <form onSubmit={handleSubmit} noValidate>

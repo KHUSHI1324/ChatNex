@@ -34,6 +34,7 @@ import {
 import Welcome from '../components/Welcome';
 import { io } from 'socket.io-client';
 import Profile from '../components/Profile'; 
+import { getAvatarSrc } from '../utils/avatarHelper';
 import FitbitIcon from '@mui/icons-material/Fitbit';
 import MessageIcon from '@mui/icons-material/Message';
 import CallIcon from '@mui/icons-material/Call';
@@ -62,6 +63,7 @@ function ChatPage() {
   const [loadingContacts, setLoadingContacts] = useState(true);
   const [contactsError, setContactsError] = useState(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState('main');
   const [isAppLocked, setIsAppLocked] = useState(false);
 
   const showToast = (type = 'info', title = 'Notice', message = '') => {
@@ -84,7 +86,7 @@ function ChatPage() {
   const fetchCallLogs = async () => {
     if (!currentUser?._id) return;
     try {
-      const res = await axios.get(`${getCallLogsRoute}/${currentUser._id}`);
+      const res = await axios.get(getCallLogsRoute);
       if (res.data?.status && Array.isArray(res.data.callLogs)) {
         setCallLogs(res.data.callLogs);
       }
@@ -155,7 +157,7 @@ function ChatPage() {
     if (currentUser?._id) {
       localStorage.removeItem(`chatnex_call_history_${currentUser._id}`);
       try {
-        await axios.delete(`${clearCallLogsRoute}/${currentUser._id}`);
+        await axios.delete(clearCallLogsRoute);
         showToast('info', 'Call History Cleared', 'All call logs have been removed.');
       } catch (err) {
         console.warn('Error clearing call logs from DB:', err.message);
@@ -190,13 +192,21 @@ function ChatPage() {
       if (hasSyncedProfile.current) return;
       hasSyncedProfile.current = true;
 
-      // Fetch latest profile from DB only if avatar, details, privacy or passcode changed
+      // Fetch latest profile from DB with viewerId to ensure privacy filter doesn't strip self profile data
       try {
         if (localUser?._id) {
-          const res = await axios.get(`${getUserRoute}/${localUser._id}`);
+          const res = await axios.get(`${getUserRoute}/${localUser._id}?viewerId=${localUser._id}`);
           if (res.data?.status && res.data.user) {
             const fetched = res.data.user;
-            const freshUser = { ...localUser, ...fetched };
+            const freshUser = {
+              ...localUser,
+              ...fetched,
+              avtarImage: fetched.avtarImage || localUser.avtarImage,
+              isAvtarImageSet: fetched.isAvtarImageSet !== undefined ? (fetched.isAvtarImageSet || !!(fetched.avtarImage || localUser.avtarImage)) : localUser.isAvtarImageSet,
+              about: fetched.about || localUser.about,
+              username: fetched.username || localUser.username,
+              token: localUser.token || localStorage.getItem('chat-app-token'),
+            };
             setCurrentUser(freshUser);
             localStorage.setItem('chat-app-user', JSON.stringify(freshUser));
             if (fetched.isPasscodeEnabled && sessionStorage.getItem('chatnex_session_unlocked') !== 'true') {
@@ -588,22 +598,38 @@ function ChatPage() {
     }
   };
 
+  const handleUpdateCurrentUser = (updated) => {
+    if (!updated) return;
+    setCurrentUser(updated);
+    localStorage.setItem('chat-app-user', JSON.stringify(updated));
+    if (socket?.current && updated._id) {
+      socket.current.emit("user-avatar-updated", {
+        userId: updated._id,
+        avtarImage: updated.avtarImage,
+        isAvtarImageSet: updated.isAvtarImageSet,
+        username: updated.username,
+        about: updated.about,
+      });
+    }
+  };
+
   const handleUpdateGroupAvatar = async (groupId, groupImage) => {
     try {
       const res = await axios.put(updateGroupAvatarRoute, {
         groupId,
         groupImage,
+        userId: currentUser?._id,
       });
       const updatedGroup = res.data.group;
       if (updatedGroup) {
         setGroups((prev) =>
-          prev.map((g) => (g._id === groupId ? { ...g, avtarImage: updatedGroup.avtarImage } : g))
+          prev.map((g) => (g._id === groupId ? { ...g, ...updatedGroup, avtarImage: updatedGroup.avtarImage } : g))
         );
         setContacts((prev) =>
-          prev.map((c) => (c._id === groupId ? { ...c, avtarImage: updatedGroup.avtarImage } : c))
+          prev.map((c) => (c._id === groupId ? { ...c, ...updatedGroup, avtarImage: updatedGroup.avtarImage } : c))
         );
-        if (currentChat && currentChat._id === groupId) {
-          setCurrentChat((prev) => ({ ...prev, avtarImage: updatedGroup.avtarImage }));
+        if (currentChatRef.current && currentChatRef.current._id === groupId) {
+          setCurrentChat((prev) => ({ ...prev, ...updatedGroup, avtarImage: updatedGroup.avtarImage }));
         }
         if (socket?.current && updatedGroup.members) {
           socket.current.emit("group-action", {
@@ -803,8 +829,10 @@ function ChatPage() {
 
   useEffect(() => {
     if (currentUser?._id) {
+      const token = localStorage.getItem('chat-app-token') || currentUser?.token;
       socket.current = io(host, {
         transports: ["websocket", "polling"],
+        auth: { token },
       });
 
       socket.current.on("connect", () => {
@@ -868,6 +896,61 @@ function ChatPage() {
             if (prev.some((c) => c._id?.toString() === user._id?.toString())) return prev;
             return [...prev, user];
           });
+        }
+      });
+
+      // Real-time listener for user profile/avatar update across all connected clients
+      socket.current.on("user-avatar-updated", (data) => {
+        console.log("[FRONTEND] user-avatar-updated event received:", data);
+        const { userId, avtarImage, isAvtarImageSet, username, about } = data || {};
+        if (!userId) return;
+
+        // 1. Update contact in contacts list
+        setContacts((prev) =>
+          prev.map((c) => {
+            if (c._id?.toString() === userId.toString()) {
+              return {
+                ...c,
+                ...(avtarImage !== undefined ? { avtarImage, isAvtarImageSet: isAvtarImageSet ?? true } : {}),
+                ...(username ? { username } : {}),
+                ...(about !== undefined ? { about } : {}),
+              };
+            }
+            return c;
+          })
+        );
+
+        // 2. Update member profile inside all groups
+        setGroups((prev) =>
+          prev.map((g) => {
+            let changed = false;
+            const updatedMembers = (g.members || []).map((m) => {
+              const mId = (m._id || m).toString();
+              if (mId === userId.toString()) {
+                changed = true;
+                return typeof m === "object"
+                  ? {
+                      ...m,
+                      ...(avtarImage !== undefined ? { avtarImage, isAvtarImageSet: isAvtarImageSet ?? true } : {}),
+                      ...(username ? { username } : {}),
+                      ...(about !== undefined ? { about } : {}),
+                    }
+                  : m;
+              }
+              return m;
+            });
+            return changed ? { ...g, members: updatedMembers } : g;
+          })
+        );
+
+        // 3. Update currentChat if viewing this user
+        if (currentChatRef.current && currentChatRef.current._id?.toString() === userId.toString()) {
+          setCurrentChat((prev) => ({
+            ...prev,
+            ...(avtarImage !== undefined ? { avtarImage, isAvtarImageSet: isAvtarImageSet ?? true } : {}),
+            ...(username ? { username } : {}),
+            ...(about !== undefined ? { about } : {}),
+          }));
         }
       });
 
@@ -1440,13 +1523,20 @@ function ChatPage() {
           {/* Settings Button */}
           <div
             title='Settings'
-            onClick={() => setIsSettingsOpen((prev) => !prev)}
+            onClick={() => {
+              if (isSettingsOpen && settingsSection === 'main') {
+                setIsSettingsOpen(false);
+              } else {
+                setSettingsSection('main');
+                setIsSettingsOpen(true);
+              }
+            }}
             style={{
-              color: isSettingsOpen ? '#00a884' : '#8696a0',
+              color: isSettingsOpen && settingsSection === 'main' ? '#00a884' : '#8696a0',
               cursor: 'pointer',
               padding: '8px',
               borderRadius: '50%',
-              backgroundColor: isSettingsOpen ? 'rgba(0,168,132,0.15)' : 'transparent',
+              backgroundColor: isSettingsOpen && settingsSection === 'main' ? 'rgba(0,168,132,0.15)' : 'transparent',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -1457,23 +1547,41 @@ function ChatPage() {
           </div>
 
           {/* Profile Avatar Button */}
-          <Profile
-            currentUser={currentUser}
-            currentUserName={currentUser?.username}
-            currentUserImage={currentUser?.avtarImage}
-            email={currentUser?.email}
-            onUpdateAvatar={(newImage) => {
-              setCurrentUser((prev) => ({
-                ...prev,
-                isAvtarImageSet: true,
-                avtarImage: newImage,
-              }));
+          <div
+            title='Profile & Avatar'
+            onClick={() => {
+              if (isSettingsOpen && settingsSection === 'profile') {
+                setIsSettingsOpen(false);
+              } else {
+                setSettingsSection('profile');
+                setIsSettingsOpen(true);
+              }
             }}
-            onUpdateCurrentUser={(updated) => {
-              setCurrentUser(updated);
-              localStorage.setItem('chat-app-user', JSON.stringify(updated));
+            style={{
+              cursor: 'pointer',
+              padding: '2px',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'transform 0.15s ease, border-color 0.15s ease',
+              border: isSettingsOpen && settingsSection === 'profile' ? '2px solid #00a884' : '2px solid transparent',
             }}
-          />
+            onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.08)')}
+            onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+          >
+            <img
+              src={getAvatarSrc(currentUser?.avtarImage) || 'https://api.dicebear.com/7.x/bottts/svg?seed=ChatNex'}
+              alt={currentUser?.username || 'Profile'}
+              style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                objectFit: 'cover',
+                backgroundColor: '#202c33',
+              }}
+            />
+          </div>
         </div>
       </div>
 
@@ -1487,13 +1595,11 @@ function ChatPage() {
           {/* Settings Drawer overlay over sidebar */}
           {isSettingsOpen && (
             <SettingsDrawer
+              initialSection={settingsSection}
               currentUser={currentUser}
               contacts={contacts}
               onClose={() => setIsSettingsOpen(false)}
-              onUpdateCurrentUser={(updated) => {
-                setCurrentUser(updated);
-                localStorage.setItem('chat-app-user', JSON.stringify(updated));
-              }}
+              onUpdateCurrentUser={handleUpdateCurrentUser}
               onLockAppNow={() => {
                 setIsSettingsOpen(false);
                 sessionStorage.removeItem('chatnex_session_unlocked');
@@ -1597,10 +1703,7 @@ function ChatPage() {
               onCreateSimilarGroup={handleCreateSimilarGroup}
               onLeaveGroup={handleLeaveGroup}
               onDeleteGroup={handleDeleteGroup}
-              onUpdateCurrentUser={(updated) => {
-                setCurrentUser(updated);
-                localStorage.setItem('chat-app-user', JSON.stringify(updated));
-              }}
+              onUpdateCurrentUser={handleUpdateCurrentUser}
               onBackToChats={() => setCurrentChat(undefined)}
               showToast={showToast}
             />
