@@ -46,7 +46,11 @@ const AI_BOT_AVATAR = `data:image/svg+xml;base64,${Buffer.from(
 
 exports.addMessage = async (req, res, next) => {
   try {
-    const { from, to, message, isGroup, groupId, replyTo } = req.body;
+    const from = req.user?.id;
+    if (!from) {
+      return res.status(401).json({ status: false, msg: "Authentication required" });
+    }
+    const { to, message, isGroup, groupId, replyTo, sessionId } = req.body;
     const timestamp = new Date();
 
     let usersList = [from, to];
@@ -207,9 +211,13 @@ exports.addMessage = async (req, res, next) => {
 
 exports.markAsRead = async (req, res, next) => {
   try {
-    const { from, to, isGroup, groupId } = req.body; // 'from' is contactId/groupId, 'to' is currentUserId
-    if (!from || !to) {
-      return res.status(400).json({ msg: "from and to are required" });
+    const to = req.user?.id; // 'to' is the authenticated user reading the messages
+    if (!to) {
+      return res.status(401).json({ status: false, msg: "Authentication required" });
+    }
+    const { from, isGroup, groupId } = req.body; // 'from' is contactId/groupId
+    if (!from) {
+      return res.status(400).json({ msg: "from is required" });
     }
 
     if (from === "chatnex_ai_bot" || to === "chatnex_ai_bot") {
@@ -285,7 +293,11 @@ const getFileType = (mimetype, filename = "") => {
 
 exports.getAllMessage = async (req, res, next) => {
   try {
-    const { from, to, isGroup, groupId, sessionId } = req.body;
+    const from = req.user?.id;
+    if (!from) {
+      return res.status(401).json({ status: false, msg: "Authentication required" });
+    }
+    const { to, isGroup, groupId, sessionId } = req.body;
     let query;
 
     if (isGroup || groupId) {
@@ -392,9 +404,9 @@ exports.getAllMessage = async (req, res, next) => {
 // Get all AI chat conversation sessions for a user
 exports.getAISessions = async (req, res, next) => {
   try {
-    const { userId } = req.body;
+    const userId = req.user?.id;
     if (!userId) {
-      return res.status(400).json({ status: false, msg: "userId is required" });
+      return res.status(401).json({ status: false, msg: "Authentication required" });
     }
 
     const messages = await messageModel
@@ -453,9 +465,13 @@ exports.getAISessions = async (req, res, next) => {
 // Delete an entire AI session
 exports.deleteAISession = async (req, res, next) => {
   try {
-    const { userId, sessionId } = req.body;
-    if (!userId || !sessionId) {
-      return res.status(400).json({ status: false, msg: "userId and sessionId are required" });
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ status: false, msg: "Authentication required" });
+    }
+    const { sessionId } = req.body;
+    if (!sessionId) {
+      return res.status(400).json({ status: false, msg: "sessionId is required" });
     }
 
     const filter = {
@@ -474,11 +490,34 @@ exports.deleteAISession = async (req, res, next) => {
 };
 
 exports.uploadMedia = async (req, res, next) => {
+  const from = req.user?.id;
+  if (!from) {
+    return res.status(401).json({ status: false, msg: "Authentication required" });
+  }
+
   const rawFiles = req.files || (req.file ? [req.file] : []);
-  const { from, to, message, isGroup, groupId, replyTo, voiceTranscript } = req.body;
+  const { to, message, isGroup, groupId, replyTo, voiceTranscript } = req.body;
 
   if (!rawFiles || rawFiles.length === 0) {
     return res.status(400).json({ status: 400, error: "No files uploaded" });
+  }
+
+  if (!mongoose.isValidObjectId(from)) {
+    return res.status(400).json({ status: 400, error: "Invalid sender ID format" });
+  }
+
+  if (!to) {
+    return res.status(400).json({ status: 400, error: "Recipient ID (to) is required" });
+  }
+
+  const isGroupChat = Boolean(isGroup === "true" || isGroup === true || groupId);
+
+  if (!isGroupChat && to !== "chatnex_ai_bot" && !mongoose.isValidObjectId(to)) {
+    return res.status(400).json({ status: 400, error: "Invalid recipient ID format" });
+  }
+
+  if (groupId && !mongoose.isValidObjectId(groupId)) {
+    return res.status(400).json({ status: 400, error: "Invalid group ID format" });
   }
 
   try {
@@ -638,46 +677,68 @@ exports.uploadMedia = async (req, res, next) => {
 // React to Message (Add / Toggle Emoji Reaction)
 exports.reactToMessage = async (req, res, next) => {
   try {
-    const { messageId, userId, username, emoji } = req.body;
-    if (!messageId || !userId || !emoji) {
-      return res.status(400).json({ status: false, msg: "messageId, userId, and emoji are required" });
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ status: false, msg: "Authentication required" });
     }
 
-    const msg = await messageModel.findById(messageId);
-    if (!msg) {
-      return res.status(404).json({ status: false, msg: "Message not found" });
+    const { messageId, username, emoji } = req.body;
+    if (!messageId || !emoji) {
+      return res.status(400).json({ status: false, msg: "messageId and emoji are required" });
+    }
+
+    if (!mongoose.isValidObjectId(messageId)) {
+      return res.status(400).json({ status: false, msg: "Invalid message ID format" });
+    }
+
+    if (!mongoose.isValidObjectId(userId)) {
+      return res.status(400).json({ status: false, msg: "Invalid user ID format" });
     }
 
     const userIdStr = userId.toString();
-    const existingIndex = (msg.reactions || []).findIndex(
-      (r) => ((r.userId?._id || r.userId || r.user || "")).toString() === userIdStr
-    );
+    const userIdObj = new mongoose.Types.ObjectId(userId);
 
-    if (existingIndex > -1) {
-      if (msg.reactions[existingIndex].emoji === emoji) {
-        // Toggle off reaction if exact same emoji clicked again
-        msg.reactions.splice(existingIndex, 1);
-      } else {
-        // Update to new emoji
-        msg.reactions[existingIndex].emoji = emoji;
-        msg.reactions[existingIndex].username = username || msg.reactions[existingIndex].username;
-      }
-    } else {
-      // Add new reaction
-      msg.reactions.push({
-        userId: new mongoose.Types.ObjectId(userId),
-        username: username || "",
-        emoji,
-      });
+    // 1. Initial lightweight read to check existence and detect if this is a toggle-off
+    const existingMsg = await messageModel.findById(messageId).select("reactions");
+    if (!existingMsg) {
+      return res.status(404).json({ status: false, msg: "Message not found" });
     }
 
-    await msg.save();
+    const currentReactions = existingMsg.reactions || [];
+    const userReaction = currentReactions.find(
+      (r) => (r.userId?._id || r.userId || r.user || "").toString() === userIdStr
+    );
 
+    const isToggleOff = Boolean(userReaction && userReaction.emoji === emoji);
+
+    // 2. Atomic $pull to remove any existing reaction from this user
+    await messageModel.findOneAndUpdate(
+      { _id: messageId },
+      { $pull: { reactions: { userId: userIdObj } } }
+    );
+
+    // 3. If not toggle-off, atomic $push new reaction
+    if (!isToggleOff) {
+      await messageModel.findOneAndUpdate(
+        { _id: messageId },
+        {
+          $push: {
+            reactions: {
+              userId: userIdObj,
+              username: username || "",
+              emoji,
+            },
+          },
+        }
+      );
+    }
+
+    // 4. Return updated message with populated reactions
     const populatedMsg = await messageModel
       .findById(messageId)
       .populate("reactions.userId", "username avtarImage email _id");
 
-    const formattedReactions = (populatedMsg.reactions || []).map((r) => {
+    const formattedReactions = (populatedMsg?.reactions || []).map((r) => {
       const rUser = r.userId && typeof r.userId === "object" ? r.userId : null;
       const uid = rUser ? (rUser._id || "").toString() : (r.userId || r.user || "").toString();
       return {
@@ -697,9 +758,18 @@ exports.reactToMessage = async (req, res, next) => {
 // Edit Message Text
 exports.editMessage = async (req, res, next) => {
   try {
-    const { messageId, userId, newText } = req.body;
-    if (!messageId || !userId || !newText?.trim()) {
-      return res.status(400).json({ status: false, msg: "messageId, userId, and newText are required" });
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ status: false, msg: "Authentication required" });
+    }
+
+    const { messageId, newText } = req.body;
+    if (!messageId || !newText?.trim()) {
+      return res.status(400).json({ status: false, msg: "messageId and newText are required" });
+    }
+
+    if (!mongoose.isValidObjectId(messageId)) {
+      return res.status(400).json({ status: false, msg: "Invalid message ID format" });
     }
 
     const msg = await messageModel.findById(messageId);
@@ -733,9 +803,18 @@ exports.editMessage = async (req, res, next) => {
 // Delete Message ("everyone" vs "me")
 exports.deleteMessage = async (req, res, next) => {
   try {
-    const { messageId, userId, deleteType } = req.body; // deleteType: 'everyone' | 'me'
-    if (!messageId || !userId || !deleteType) {
-      return res.status(400).json({ status: false, msg: "messageId, userId, and deleteType are required" });
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ status: false, msg: "Authentication required" });
+    }
+
+    const { messageId, deleteType } = req.body; // deleteType: 'everyone' | 'me'
+    if (!messageId || !deleteType) {
+      return res.status(400).json({ status: false, msg: "messageId and deleteType are required" });
+    }
+
+    if (!mongoose.isValidObjectId(messageId)) {
+      return res.status(400).json({ status: false, msg: "Invalid message ID format" });
     }
 
     const msg = await messageModel.findById(messageId);
@@ -784,9 +863,18 @@ exports.deleteMessage = async (req, res, next) => {
 // Pin / Unpin Message
 exports.pinMessage = async (req, res, next) => {
   try {
-    const { messageId, userId, isPinned } = req.body;
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ status: false, msg: "Authentication required" });
+    }
+
+    const { messageId, isPinned } = req.body;
     if (!messageId) {
       return res.status(400).json({ status: false, msg: "messageId is required" });
+    }
+
+    if (!mongoose.isValidObjectId(messageId)) {
+      return res.status(400).json({ status: false, msg: "Invalid message ID format" });
     }
 
     const msg = await messageModel.findById(messageId);
@@ -797,7 +885,7 @@ exports.pinMessage = async (req, res, next) => {
     const shouldPin = Boolean(isPinned);
     msg.isPinned = shouldPin;
     msg.pinnedAt = shouldPin ? new Date() : null;
-    msg.pinnedBy = shouldPin && userId ? new mongoose.Types.ObjectId(userId) : null;
+    msg.pinnedBy = shouldPin ? new mongoose.Types.ObjectId(userId) : null;
     await msg.save();
 
     return res.json({
@@ -814,9 +902,18 @@ exports.pinMessage = async (req, res, next) => {
 // Star / Unstar Message
 exports.starMessage = async (req, res, next) => {
   try {
-    const { messageId, userId } = req.body;
-    if (!messageId || !userId) {
-      return res.status(400).json({ status: false, msg: "messageId and userId are required" });
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ status: false, msg: "Authentication required" });
+    }
+
+    const { messageId } = req.body;
+    if (!messageId) {
+      return res.status(400).json({ status: false, msg: "messageId is required" });
+    }
+
+    if (!mongoose.isValidObjectId(messageId)) {
+      return res.status(400).json({ status: false, msg: "Invalid message ID format" });
     }
 
     const msg = await messageModel.findById(messageId);

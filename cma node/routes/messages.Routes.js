@@ -2,6 +2,7 @@
 const express = require("express");
 const router = express.Router();
 const multer = require('multer'); 
+const verifyToken = require("../middleware/verifyToken");
 const {
   addMessage,
   getAllMessage,
@@ -15,6 +16,8 @@ const {
   getAISessions,
   deleteAISession,
 } = require("../controllers/messagesController");
+
+router.use(verifyToken);
 
 // Allowed mime types & extensions
 const ALLOWED_MIME_TYPES = new Set([
@@ -77,12 +80,15 @@ const fileFilter = (req, file, callback) => {
 };
 
 // Configure multer with 50MB limit per file and up to 10 files
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB per file
+const MAX_FILES_COUNT = 10;
+
 const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB per file
-    files: 10,
+    fileSize: MAX_FILE_SIZE,
+    files: MAX_FILES_COUNT,
   },
 });
 
@@ -93,10 +99,10 @@ router.post(
     upload.any()(req, res, (err) => {
       if (err instanceof multer.MulterError) {
         if (err.code === "LIMIT_FILE_SIZE") {
-          return res.status(400).json({ status: 400, error: "File size exceeds 10MB limit per file." });
+          return res.status(400).json({ status: 400, error: "File size exceeds 50MB limit per file." });
         }
         if (err.code === "LIMIT_FILE_COUNT") {
-          return res.status(400).json({ status: 400, error: "Cannot upload more than 10 files at once." });
+          return res.status(400).json({ status: 400, error: `Cannot upload more than ${MAX_FILES_COUNT} files at once.` });
         }
         return res.status(400).json({ status: 400, error: err.message });
       } else if (err) {

@@ -3,11 +3,12 @@ const User = require('../models/userModels');
 
 module.exports.createStatus = async (req, res, next) => {
   try {
-    const { userId, mediaUrl, mediaType, caption, backgroundColor } = req.body;
-
+    const userId = req.user?.id;
     if (!userId) {
-      return res.json({ status: false, msg: 'User ID is required' });
+      return res.status(401).json({ status: false, msg: 'Authentication required' });
     }
+
+    const { mediaUrl, mediaType, caption, backgroundColor } = req.body;
 
     let finalMediaUrl = mediaUrl || '';
     let finalMediaType = mediaType || 'text';
@@ -44,7 +45,12 @@ module.exports.createStatus = async (req, res, next) => {
 
 module.exports.getStatuses = async (req, res, next) => {
   try {
-    const { userId } = req.params;
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ status: false, msg: 'Authentication required' });
+    }
+
+    const userIdStr = userId.toString();
     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
     const activeStatuses = await Status.find({
@@ -62,7 +68,7 @@ module.exports.getStatuses = async (req, res, next) => {
       const storyUser = status.user;
       if (!storyUser) return;
 
-      const isMe = storyUser._id.toString() === userId.toString();
+      const isMe = storyUser._id.toString() === userIdStr;
       if (isMe) {
         myStatuses.push(status);
       } else {
@@ -80,7 +86,7 @@ module.exports.getStatuses = async (req, res, next) => {
 
         // Check if current user viewed this story
         const viewedByMe = status.viewers.some(
-          (v) => v.user?._id?.toString() === userId.toString()
+          (v) => (v.user?._id || v.user)?.toString() === userIdStr
         );
         if (!viewedByMe) {
           contactsMap[contactId].hasUnseen = true;
@@ -104,8 +110,13 @@ module.exports.getStatuses = async (req, res, next) => {
 
 module.exports.viewStatus = async (req, res, next) => {
   try {
-    const { statusId, viewerId } = req.body;
-    if (!statusId || !viewerId) {
+    const viewerId = req.user?.id;
+    if (!viewerId) {
+      return res.status(401).json({ status: false, msg: 'Authentication required' });
+    }
+
+    const { statusId } = req.body;
+    if (!statusId) {
       return res.json({ status: false, msg: 'Missing statusId or viewerId' });
     }
 
@@ -114,8 +125,9 @@ module.exports.viewStatus = async (req, res, next) => {
       return res.json({ status: false, msg: 'Status not found' });
     }
 
+    const viewerIdStr = viewerId.toString();
     const alreadyViewed = statusDoc.viewers.some(
-      (v) => v.user?.toString() === viewerId.toString()
+      (v) => (v.user?._id || v.user)?.toString() === viewerIdStr
     );
 
     if (!alreadyViewed) {
@@ -138,8 +150,12 @@ module.exports.viewStatus = async (req, res, next) => {
 
 module.exports.deleteStatus = async (req, res, next) => {
   try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ status: false, msg: 'Authentication required' });
+    }
+
     const { statusId } = req.params;
-    const { userId } = req.body;
 
     const statusDoc = await Status.findById(statusId);
     if (!statusDoc) {
@@ -156,3 +172,4 @@ module.exports.deleteStatus = async (req, res, next) => {
     next(ex);
   }
 };
+

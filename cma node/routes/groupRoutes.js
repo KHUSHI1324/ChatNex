@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const verifyToken = require("../middleware/verifyToken");
 const {
   createGroup,
   getUserGroups,
@@ -13,7 +14,10 @@ const {
   updateGroupDetails,
 } = require("../controllers/groupController");
 
+router.use(verifyToken);
+
 router.post("/create", createGroup);
+router.get("/user-groups", getUserGroups);
 router.get("/user-groups/:userId", getUserGroups);
 router.put("/add-members", addMembers);
 router.put("/remove-member", removeMember);

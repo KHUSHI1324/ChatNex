@@ -6,8 +6,8 @@ const mongoose = require("mongoose");
 // Log a call event to database
 exports.logCall = async (req, res, next) => {
   try {
+    const caller = req.user?.id;
     const {
-      caller,
       receiver,
       isGroup,
       groupId,
@@ -19,7 +19,7 @@ exports.logCall = async (req, res, next) => {
       endedAt,
     } = req.body;
 
-    if (!caller) {
+    if (!caller || !mongoose.isValidObjectId(caller)) {
       return res.status(400).json({ status: false, msg: "Caller ID is required" });
     }
 
@@ -62,7 +62,7 @@ exports.logCall = async (req, res, next) => {
 // Get call history for a user
 exports.getUserCallLogs = async (req, res, next) => {
   try {
-    const { userId } = req.params;
+    const userId = req.user?.id;
     if (!userId || !mongoose.isValidObjectId(userId)) {
       return res.status(400).json({ status: false, msg: "Valid user ID is required" });
     }
@@ -135,7 +135,7 @@ exports.getUserCallLogs = async (req, res, next) => {
 // Clear call logs for a user
 exports.clearCallLogs = async (req, res, next) => {
   try {
-    const { userId } = req.params;
+    const userId = req.user?.id;
     if (!userId || !mongoose.isValidObjectId(userId)) {
       return res.status(400).json({ status: false, msg: "Valid user ID is required" });
     }
@@ -156,3 +156,4 @@ exports.clearCallLogs = async (req, res, next) => {
     next(error);
   }
 };
+

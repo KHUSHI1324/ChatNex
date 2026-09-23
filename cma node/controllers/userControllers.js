@@ -1,76 +1,151 @@
 const User = require("../models/userModels");
 const mongoose = require("mongoose");
 const bcrypt = require('bcrypt');
+const jwt = require("jsonwebtoken");
+require("dotenv").config();
 
-module.exports.register=async(req,res,next)=>{
+// Helper to apply granular privacy rules to a user object based on viewer identity
+const applyPrivacyFilter = (targetUser, viewerId) => {
+    if (!targetUser) return targetUser;
+    const target = targetUser.toObject ? targetUser.toObject() : { ...targetUser };
+    const vStr = viewerId ? (viewerId._id || viewerId).toString() : null;
+    const tStr = target._id ? (target._id._id || target._id).toString() : null;
+    const isSelf = Boolean(vStr && tStr && vStr === tStr);
 
-    try{
-        const{username,email,password}=req.body;
-    const usernameCheck=await User.findOne({username});
-    if(usernameCheck)
-    return res.json({msg: 'username already used',status:false});
+    if (isSelf) {
+        return target;
+    }
 
-   const emailCheck=await User.findOne({email});
-   if(emailCheck) 
-   return res.json({msg: 'email already used',status:false});
-   
-   const hashedPassword =await bcrypt.hash(password,10);
-   const user =await User.create({
-       email,username,
-       password: hashedPassword,
-   });
-   delete user.password;
-   return res.json({status:true,user});
-}catch(ex){
-    next(ex);
- }
+    const savedContacts = (target.savedContacts || []).map(c => (c._id || c).toString());
+    const isContact = Boolean(vStr && savedContacts.includes(vStr));
+
+    const privacy = target.privacySettings || {};
+    const photoPrivacy = privacy.profilePhoto || 'everyone';
+    const emailPrivacy = privacy.email || 'everyone';
+    const aboutPrivacy = privacy.about || 'everyone';
+    const lastSeenPrivacy = privacy.lastSeen || 'everyone';
+
+    if (photoPrivacy === 'nobody' || (photoPrivacy === 'contacts' && !isContact)) {
+        target.avtarImage = "";
+        target.isAvtarImageSet = false;
+    }
+
+    if (emailPrivacy === 'nobody' || (emailPrivacy === 'contacts' && !isContact)) {
+        target.email = "";
+    }
+
+    if (aboutPrivacy === 'nobody' || (aboutPrivacy === 'contacts' && !isContact)) {
+        target.about = "";
+    }
+
+    if (lastSeenPrivacy === 'nobody' || (lastSeenPrivacy === 'contacts' && !isContact)) {
+        target.lastSeen = null;
+    }
+
+    return target;
 };
 
-module.exports.login=async(req,res,next)=>{
+module.exports.applyPrivacyFilter = applyPrivacyFilter;
 
-    try{
-        const {username,password}=req.body;
-        if (!username || !password) {
-            return res.json({msg:'Invalid email or password',status:false});
+module.exports.register = async (req, res, next) => {
+
+    try {
+        const { username, email, password } = req.body;
+        const usernameCheck = await User.findOne({ username });
+        if (usernameCheck)
+            return res.json({ msg: 'Username already used', status: false });
+
+        const emailCheck = await User.findOne({ email });
+        if (emailCheck)
+            return res.json({ msg: 'Email already used', status: false });
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const user = await User.create({
+            email, username,
+            password: hashedPassword,
+        });
+        delete user.password;
+        const token = jwt.sign(
+            { id: user._id, username: user.username },
+            process.env.JWT_SECRET,
+            { expiresIn: process.env.JWT_EXPIRY || '7d' }
+        );
+        return res.json({ status: true, user, token });
+    } catch (ex) {
+        if (ex.code === 11000) {
+            const keyPattern = ex.keyPattern || {};
+            const keyValue = ex.keyValue || {};
+            if (keyPattern.username || keyValue.username) {
+                return res.json({ msg: 'Username already used', status: false });
+            }
+            if (keyPattern.email || keyValue.email) {
+                return res.json({ msg: 'Email already used', status: false });
+            }
+            return res.json({ msg: 'Username or Email already in use', status: false });
         }
-        const user=await User.findOne({
+        next(ex);
+    }
+};
+
+module.exports.login = async (req, res, next) => {
+
+    try {
+        const { username, password } = req.body;
+        if (!username || !password) {
+            return res.json({ msg: 'Invalid email or password', status: false });
+        }
+        const user = await User.findOne({
             $or: [
                 { username: username.trim() },
                 { email: username.trim().toLowerCase() }
             ]
         });
-        if(!user)
-            return res.json({msg:'Invalid email or password',status:false});
+        if (!user)
+            return res.json({ msg: 'Invalid email or password', status: false });
 
-        const isPasswordValid=await bcrypt.compare(password,user.password);  
-        if(!isPasswordValid)
-            return res.json({msg: "Invalid email or password",status:false});
+        const isPasswordValid = await bcrypt.compare(password, user.password);
+        if (!isPasswordValid)
+            return res.json({ msg: "Invalid email or password", status: false });
         delete user.password;
-        return res.json({status:true,user});
-    }catch(ex){
+        const token = jwt.sign(
+            { id: user._id, username: user.username },
+            process.env.JWT_SECRET,
+            { expiresIn: process.env.JWT_EXPIRY || '7d' }
+        );
+        return res.json({ status: true, user, token });
+    } catch (ex) {
         next(ex);
-    } };
-  module.exports.avtar=async(req,res,next)=>{
-    try{
-const userId=req.params.id;
-const avtarImage=req.body.image;
-const userData=await User.findByIdAndUpdate(userId,{
-    isAvtarImageSet:true,
-    avtarImage,
-}, { new: true });
-return res.json({isSet: userData.isAvtarImageSet,
-                 image: userData.avtarImage,
-});
-}catch(ex){
- next(ex)
-}
+    }
+};
+module.exports.avtar = async (req, res, next) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ status: false, msg: "Authentication required" });
+        }
+        const avtarImage = req.body.image;
+        const userData = await User.findByIdAndUpdate(userId, {
+            isAvtarImageSet: true,
+            avtarImage,
+        }, { new: true });
+        return res.json({
+            isSet: userData.isAvtarImageSet,
+            image: userData.avtarImage,
+        });
+    } catch (ex) {
+        next(ex)
+    }
 };
 
 module.exports.getUserById = async (req, res, next) => {
     try {
+        const viewerId = req.user?.id;
+        if (!viewerId) {
+            return res.status(401).json({ status: false, msg: "Authentication required" });
+        }
         const user = await User.findById(req.params.id).select("-password");
         if (!user) return res.json({ status: false, msg: "User not found" });
-        return res.json({ status: true, user });
+        return res.json({ status: true, user: applyPrivacyFilter(user, viewerId) });
     } catch (ex) {
         next(ex);
     }
@@ -141,9 +216,13 @@ module.exports.logAvatarFallback = async (req, res) => {
     }
 };
 
-module.exports.getAllUsers=async(req,res,next)=>{
+module.exports.getAllUsers = async (req, res, next) => {
     try {
-        const users=await User.find({_id:{$ne:req.params.id}}).select([
+        const viewerId = req.user?.id;
+        if (!viewerId) {
+            return res.status(401).json({ status: false, msg: "Authentication required" });
+        }
+        const users = await User.find({ _id: { $ne: viewerId } }).select([
             "email",
             "username",
             "about",
@@ -153,7 +232,8 @@ module.exports.getAllUsers=async(req,res,next)=>{
             "isAvtarImageSet",
             "_id",
         ]);
-        return res.json(users);
+        const filteredUsers = users.map(u => applyPrivacyFilter(u, viewerId));
+        return res.json(filteredUsers);
     } catch (ex) {
         next(ex);
     }
@@ -161,8 +241,12 @@ module.exports.getAllUsers=async(req,res,next)=>{
 
 module.exports.getContactsWithLastMessage = async (req, res, next) => {
     try {
-        const currentUserId = new mongoose.Types.ObjectId(req.params.id);
-        const currentUserIdStr = req.params.id.toString();
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ status: false, msg: "Authentication required" });
+        }
+        const currentUserId = new mongoose.Types.ObjectId(userId);
+        const currentUserIdStr = userId.toString();
 
         const currentUserDoc = await User.findById(currentUserId).select("savedContacts");
         const savedContactIds = (currentUserDoc?.savedContacts || []).map(id => new mongoose.Types.ObjectId(id));
@@ -315,11 +399,13 @@ module.exports.getContactsWithLastMessage = async (req, res, next) => {
                 }
             }
 
+            const filtered = applyPrivacyFilter(contact, currentUserIdStr);
+
             return {
                 _id: contact._id,
                 username: contact.username,
-                email: contact.email,
-                about: contact.about || "Hey there! I am using ChatNex.",
+                email: filtered.email,
+                about: filtered.about !== undefined ? filtered.about : (contact.about || "Hey there! I am using ChatNex."),
                 privacySettings: {
                     lastSeen: contact.privacySettings?.lastSeen || 'everyone',
                     readReceipts: contact.privacySettings?.readReceipts !== false,
@@ -328,8 +414,8 @@ module.exports.getContactsWithLastMessage = async (req, res, next) => {
                     about: contact.privacySettings?.about || 'everyone'
                 },
                 savedContacts: contact.savedContacts || [],
-                avtarImage: contact.avtarImage,
-                isAvtarImageSet: contact.isAvtarImageSet,
+                avtarImage: filtered.avtarImage,
+                isAvtarImageSet: filtered.isAvtarImageSet,
                 latestMessage: {
                     message: preview,
                     imgpath: imgpath,
@@ -350,7 +436,11 @@ module.exports.getContactsWithLastMessage = async (req, res, next) => {
 
 module.exports.updateProfile = async (req, res, next) => {
     try {
-        const { userId, username, about } = req.body;
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ status: false, msg: "Authentication required" });
+        }
+        const { username, about } = req.body;
         const updateData = {};
         if (about !== undefined) updateData.about = about;
         if (username !== undefined && username.trim()) {
@@ -370,7 +460,11 @@ module.exports.updateProfile = async (req, res, next) => {
 
 module.exports.updatePrivacySettings = async (req, res, next) => {
     try {
-        const { userId, privacySettings } = req.body;
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ status: false, msg: "Authentication required" });
+        }
+        const { privacySettings } = req.body;
         const user = await User.findByIdAndUpdate(
             userId,
             { privacySettings },
@@ -385,7 +479,11 @@ module.exports.updatePrivacySettings = async (req, res, next) => {
 
 module.exports.blockUser = async (req, res, next) => {
     try {
-        const { userId, targetUserId } = req.body;
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ status: false, msg: "Authentication required" });
+        }
+        const { targetUserId } = req.body;
         const user = await User.findByIdAndUpdate(
             userId,
             { $addToSet: { blockedUsers: targetUserId } },
@@ -399,7 +497,11 @@ module.exports.blockUser = async (req, res, next) => {
 
 module.exports.unblockUser = async (req, res, next) => {
     try {
-        const { userId, targetUserId } = req.body;
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ status: false, msg: "Authentication required" });
+        }
+        const { targetUserId } = req.body;
         const user = await User.findByIdAndUpdate(
             userId,
             { $pull: { blockedUsers: targetUserId } },
@@ -413,7 +515,10 @@ module.exports.unblockUser = async (req, res, next) => {
 
 module.exports.getBlockedUsers = async (req, res, next) => {
     try {
-        const { userId } = req.params;
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ status: false, msg: "Authentication required" });
+        }
         const user = await User.findById(userId).populate("blockedUsers", "username email avtarImage isAvtarImageSet");
         if (!user) return res.json({ status: false, msg: "User not found" });
         return res.json({ status: true, blockedUsers: user.blockedUsers || [] });
@@ -424,7 +529,11 @@ module.exports.getBlockedUsers = async (req, res, next) => {
 
 module.exports.setPasscode = async (req, res, next) => {
     try {
-        const { userId, passcode, isPasscodeEnabled } = req.body;
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ status: false, msg: "Authentication required" });
+        }
+        const { passcode, isPasscodeEnabled } = req.body;
         const updateData = { isPasscodeEnabled: !!isPasscodeEnabled };
         if (passcode) {
             updateData.passcode = await bcrypt.hash(passcode.toString(), 10);
@@ -439,45 +548,94 @@ module.exports.setPasscode = async (req, res, next) => {
     }
 };
 
+// In-memory attempt tracking per userId for passcode verification
+const passcodeAttempts = new Map();
+const MAX_PASSCODE_ATTEMPTS = 5;
+const PASSCODE_COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes
+
 module.exports.verifyPasscode = async (req, res, next) => {
     try {
-        const { userId, passcode } = req.body;
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ status: false, msg: "Authentication required" });
+        }
+        const { passcode } = req.body || {};
+
+        const now = Date.now();
+        const userIdStr = userId.toString();
+        const attemptRecord = passcodeAttempts.get(userIdStr) || { count: 0, lockUntil: null };
+
+        if (attemptRecord.lockUntil && attemptRecord.lockUntil > now) {
+            const remainingMinutes = Math.ceil((attemptRecord.lockUntil - now) / 60000);
+            return res.status(429).json({
+                status: false,
+                msg: `Too many attempts. Try again in ${remainingMinutes} minute${remainingMinutes > 1 ? 's' : ''}.`,
+            });
+        }
+
+        if (attemptRecord.lockUntil && attemptRecord.lockUntil <= now) {
+            attemptRecord.count = 0;
+            attemptRecord.lockUntil = null;
+        }
+
         const user = await User.findById(userId);
         if (!user || !user.passcode) {
             return res.json({ status: false, msg: "No passcode set" });
         }
-        const isValid = await bcrypt.compare(passcode.toString(), user.passcode);
+
+        const isValid = await bcrypt.compare(passcode ? passcode.toString() : "", user.passcode);
         if (!isValid) {
+            attemptRecord.count += 1;
+            if (attemptRecord.count >= MAX_PASSCODE_ATTEMPTS) {
+                attemptRecord.lockUntil = now + PASSCODE_COOLDOWN_MS;
+                passcodeAttempts.set(userIdStr, attemptRecord);
+                const remainingMinutes = Math.ceil(PASSCODE_COOLDOWN_MS / 60000);
+                return res.status(429).json({
+                    status: false,
+                    msg: `Too many attempts. Try again in ${remainingMinutes} minutes.`,
+                });
+            }
+            passcodeAttempts.set(userIdStr, attemptRecord);
             return res.json({ status: false, msg: "Incorrect passcode PIN" });
         }
+
+        // Reset attempt counter on success
+        passcodeAttempts.delete(userIdStr);
         return res.json({ status: true, msg: "Passcode verified" });
     } catch (ex) {
         next(ex);
     }
 };
 
+module.exports._resetPasscodeAttempts = () => passcodeAttempts.clear();
+
 module.exports.searchUsers = async (req, res, next) => {
     try {
-        const { q, currentUserId } = req.query;
+        const viewerId = req.user?.id;
+        if (!viewerId) {
+            return res.status(401).json({ status: false, msg: "Authentication required" });
+        }
+        const { q } = req.query;
         if (!q || q.trim() === '') {
             return res.json([]);
         }
         const cleanQuery = q.trim();
         const regex = new RegExp(cleanQuery, 'i');
-        
+
         let filter = {
             username: regex
         };
 
-        if (currentUserId && mongoose.Types.ObjectId.isValid(currentUserId)) {
-            filter._id = { $ne: new mongoose.Types.ObjectId(currentUserId) };
+        if (viewerId && mongoose.Types.ObjectId.isValid(viewerId)) {
+            filter._id = { $ne: new mongoose.Types.ObjectId(viewerId) };
         }
 
         const users = await User.find(filter)
-            .select("username avtarImage isAvtarImageSet about privacySettings _id")
+            .select("username avtarImage isAvtarImageSet about privacySettings savedContacts _id")
             .limit(20);
 
-        return res.json(users);
+        const filteredUsers = users.map(u => applyPrivacyFilter(u, viewerId));
+        return res.json(filteredUsers);
     } catch (ex) {
         next(ex);
     }
@@ -485,16 +643,21 @@ module.exports.searchUsers = async (req, res, next) => {
 
 module.exports.addContact = async (req, res, next) => {
     try {
-        const { userId, contactId } = req.body;
-        if (!userId || !contactId) {
-            return res.json({ status: false, message: "User ID and Contact ID are required" });
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ status: false, msg: "Authentication required" });
+        }
+        const { contactId } = req.body;
+        if (!contactId) {
+            return res.json({ status: false, message: "Contact ID is required" });
         }
         await User.findByIdAndUpdate(
             userId,
             { $addToSet: { savedContacts: new mongoose.Types.ObjectId(contactId) } }
         );
         const addedContact = await User.findById(contactId).select(["_id", "username", "email", "about", "privacySettings", "savedContacts", "avtarImage", "isAvtarImageSet"]);
-        return res.json({ status: true, contact: addedContact, message: "Contact added successfully" });
+        const filteredContact = applyPrivacyFilter(addedContact, userId);
+        return res.json({ status: true, contact: filteredContact, message: "Contact added successfully" });
     } catch (ex) {
         next(ex);
     }
@@ -502,9 +665,13 @@ module.exports.addContact = async (req, res, next) => {
 
 module.exports.removeContact = async (req, res, next) => {
     try {
-        const { userId, contactId } = req.body;
-        if (!userId || !contactId) {
-            return res.json({ status: false, message: "User ID and Contact ID are required" });
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ status: false, msg: "Authentication required" });
+        }
+        const { contactId } = req.body;
+        if (!contactId) {
+            return res.json({ status: false, message: "Contact ID is required" });
         }
         await User.findByIdAndUpdate(
             userId,

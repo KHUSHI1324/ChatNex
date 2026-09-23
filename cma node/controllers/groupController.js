@@ -31,17 +31,17 @@ const isGroupAdmin = (group, userId) => {
 
 exports.createGroup = async (req, res, next) => {
   try {
-    const { name, members = [], admin, groupImage } = req.body;
+    const admin = req.user?.id;
+    if (!admin) {
+      return res.status(401).json({ status: false, msg: "Authentication required" });
+    }
+    const { name, members = [], groupImage } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ status: false, msg: "Group name is required" });
     }
 
-    if (!admin) {
-      return res.status(400).json({ status: false, msg: "Admin user ID is required" });
-    }
-
-    const adminIdStr = (admin._id || admin).toString();
+    const adminIdStr = admin.toString();
     const adminUser = await User.findById(adminIdStr);
     const adminName = adminUser?.username || "Admin";
 
@@ -128,9 +128,9 @@ exports.createGroup = async (req, res, next) => {
 
 exports.getUserGroups = async (req, res, next) => {
   try {
-    const { userId } = req.params;
+    const userId = req.user?.id;
     if (!userId) {
-      return res.status(400).json({ status: false, msg: "User ID is required" });
+      return res.status(401).json({ status: false, msg: "Authentication required" });
     }
 
     const userIdStr = userId.toString();
@@ -237,9 +237,16 @@ exports.getUserGroups = async (req, res, next) => {
 
 exports.addMembers = async (req, res, next) => {
   try {
-    const { groupId, newMemberIds = [], addedBy } = req.body;
+    const addedBy = req.user?.id;
+    if (!addedBy) {
+      return res.status(401).json({ status: false, msg: "Authentication required" });
+    }
+    const { groupId, newMemberIds = [] } = req.body;
     if (!groupId) {
       return res.status(400).json({ status: false, msg: "Group ID is required" });
+    }
+    if (!mongoose.isValidObjectId(addedBy)) {
+      return res.status(400).json({ status: false, msg: "Invalid admin ID format" });
     }
 
     const group = await Group.findById(groupId);
@@ -248,7 +255,7 @@ exports.addMembers = async (req, res, next) => {
     }
 
     // Check if addedBy is currently an active member AND an admin of this group
-    const isMember = (group.members || []).some((m) => m.toString() === addedBy.toString());
+    const isMember = (group.members || []).some((m) => (m._id || m).toString() === addedBy.toString());
     if (!isMember || !isGroupAdmin(group, addedBy)) {
       return res.status(403).json({ status: false, msg: "Only active group admins can add new members" });
     }
@@ -259,21 +266,21 @@ exports.addMembers = async (req, res, next) => {
     const newUsersDocs = await User.find({ _id: { $in: newMemberIds } });
     const newUserNames = newUsersDocs.map((u) => u.username).join(", ");
 
-    const currentMemberSet = new Set(group.members.map((m) => m.toString()));
-    newMemberIds.forEach((id) => currentMemberSet.add(id.toString()));
+    const newMemberObjectIds = (Array.isArray(newMemberIds) ? newMemberIds : [])
+      .filter((id) => id && mongoose.isValidObjectId(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
 
-    const updatedMemberObjectIds = Array.from(currentMemberSet).map(
-      (id) => new mongoose.Types.ObjectId(id)
-    );
+    if (newMemberObjectIds.length > 0) {
+      // 1. Atomically add new members with $addToSet & $each
+      await Group.findByIdAndUpdate(groupId, {
+        $addToSet: { members: { $each: newMemberObjectIds } },
+      });
 
-    // Remove from pastMembers if re-added
-    const newMemberIdStrs = new Set(newMemberIds.map((id) => id.toString()));
-    group.pastMembers = (group.pastMembers || []).filter(
-      (pm) => !newMemberIdStrs.has(pm.toString())
-    );
-
-    group.members = updatedMemberObjectIds;
-    await group.save();
+      // 2. Atomically pull newly added members from pastMembers
+      await Group.findByIdAndUpdate(groupId, {
+        $pull: { pastMembers: { $in: newMemberObjectIds } },
+      });
+    }
 
     const populatedGroup = await Group.findById(group._id)
       .populate("members", "username email avtarImage _id")
@@ -284,7 +291,7 @@ exports.addMembers = async (req, res, next) => {
 
     const systemMsg = await messageModel.create({
       message: { text: systemText },
-      users: populatedGroup.members.map((m) => (m._id || m).toString()),
+      users: (populatedGroup?.members || []).map((m) => (m._id || m).toString()),
       sender: new mongoose.Types.ObjectId(addedBy || group.admin),
       groupId: group._id,
       isGroup: true,
@@ -329,7 +336,11 @@ exports.addMembers = async (req, res, next) => {
 
 exports.removeMember = async (req, res, next) => {
   try {
-    const { groupId, memberIdToRemove, removedBy } = req.body;
+    const removedBy = req.user?.id;
+    if (!removedBy) {
+      return res.status(401).json({ status: false, msg: "Authentication required" });
+    }
+    const { groupId, memberIdToRemove } = req.body;
     if (!groupId || !memberIdToRemove) {
       return res.status(400).json({ status: false, msg: "Group ID and Member ID to remove are required" });
     }
@@ -423,9 +434,13 @@ exports.removeMember = async (req, res, next) => {
 
 exports.makeAdmin = async (req, res, next) => {
   try {
-    const { groupId, memberIdToPromote, requestedBy } = req.body;
-    if (!groupId || !memberIdToPromote || !requestedBy) {
-      return res.status(400).json({ status: false, msg: "Group ID, target member ID, and admin ID are required" });
+    const requestedBy = req.user?.id;
+    if (!requestedBy) {
+      return res.status(401).json({ status: false, msg: "Authentication required" });
+    }
+    const { groupId, memberIdToPromote } = req.body;
+    if (!groupId || !memberIdToPromote) {
+      return res.status(400).json({ status: false, msg: "Group ID and target member ID are required" });
     }
 
     const group = await Group.findById(groupId);
@@ -510,9 +525,13 @@ exports.makeAdmin = async (req, res, next) => {
 
 exports.dismissAdmin = async (req, res, next) => {
   try {
-    const { groupId, memberIdToDismiss, requestedBy } = req.body;
-    if (!groupId || !memberIdToDismiss || !requestedBy) {
-      return res.status(400).json({ status: false, msg: "Group ID, member ID, and admin ID are required" });
+    const requestedBy = req.user?.id;
+    if (!requestedBy) {
+      return res.status(401).json({ status: false, msg: "Authentication required" });
+    }
+    const { groupId, memberIdToDismiss } = req.body;
+    if (!groupId || !memberIdToDismiss) {
+      return res.status(400).json({ status: false, msg: "Group ID and member ID are required" });
     }
 
     const group = await Group.findById(groupId);
@@ -600,6 +619,10 @@ exports.dismissAdmin = async (req, res, next) => {
 
 exports.updateGroupAvatar = async (req, res, next) => {
   try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ status: false, msg: "Authentication required" });
+    }
     const { groupId, groupImage } = req.body;
     if (!groupId) {
       return res.status(400).json({ status: false, msg: "Group ID is required" });
@@ -607,6 +630,12 @@ exports.updateGroupAvatar = async (req, res, next) => {
     const group = await Group.findById(groupId);
     if (!group) {
       return res.status(404).json({ status: false, msg: "Group not found" });
+    }
+
+    const uStr = userId.toString();
+    const isMember = (group.members || []).some((m) => (m._id || m).toString() === uStr);
+    if (!isMember) {
+      return res.status(403).json({ status: false, msg: "Only group members can update the group photo" });
     }
 
     group.groupImage = groupImage || DEFAULT_GROUP_SVG;
@@ -643,8 +672,11 @@ exports.updateGroupAvatar = async (req, res, next) => {
 
 exports.updateGroupDetails = async (req, res, next) => {
   try {
-    const { groupId, name, description, permissions, updatedBy: updatedByField, userId } = req.body;
-    const updatedBy = updatedByField || userId;
+    const updatedBy = req.user?.id;
+    if (!updatedBy) {
+      return res.status(401).json({ status: false, msg: "Authentication required" });
+    }
+    const { groupId, name, description, permissions } = req.body;
     if (!groupId) {
       return res.status(400).json({ status: false, msg: "Group ID is required" });
     }
@@ -747,9 +779,13 @@ exports.updateGroupDetails = async (req, res, next) => {
 
 exports.leaveGroup = async (req, res, next) => {
   try {
-    const { groupId, userId } = req.body;
-    if (!groupId || !userId) {
-      return res.status(400).json({ status: false, msg: "Group ID and User ID are required" });
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ status: false, msg: "Authentication required" });
+    }
+    const { groupId } = req.body;
+    if (!groupId) {
+      return res.status(400).json({ status: false, msg: "Group ID is required" });
     }
 
     const group = await Group.findById(groupId);
@@ -845,9 +881,13 @@ exports.leaveGroup = async (req, res, next) => {
 
 exports.deleteGroup = async (req, res, next) => {
   try {
-    const { groupId, userId } = req.body;
-    if (!groupId || !userId) {
-      return res.status(400).json({ status: false, msg: "Group ID and User ID are required" });
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ status: false, msg: "Authentication required" });
+    }
+    const { groupId } = req.body;
+    if (!groupId) {
+      return res.status(400).json({ status: false, msg: "Group ID is required" });
     }
 
     const group = await Group.findById(groupId);
